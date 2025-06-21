@@ -758,13 +758,17 @@ func (s *System) roundNoDamage() bool {
 	return sys.intro < 0 && sys.intro <= -sys.lifebar.ro.over_hittime && sys.intro >= -sys.lifebar.ro.over_waittime
 }
 
+// In Mugen, RoundState 2 begins as soon as the "Fight" screen appears, before players have control
+// That causes more harm than good and is not clearly stated in the documentation, so Ikemen changes it
 func (s *System) roundState() int32 {
 	switch {
 	case sys.intro > sys.lifebar.ro.ctrl_time+1 || sys.postMatchFlg:
 		return 0
-	case sys.lifebar.ro.current == 0:
+	//case sys.lifebar.ro.current == 0:
+	case sys.intro > 0:
 		return 1
-	case sys.intro >= 0 || sys.finishType == FT_NotYet:
+	//case sys.intro >= 0 || sys.finishType == FT_NotYet:
+	case sys.intro == 0 || sys.finishType == FT_NotYet:
 		return 2
 	case sys.intro < -sys.lifebar.ro.over_waittime:
 		return 4
@@ -2196,11 +2200,17 @@ func (s *System) fight() (reload bool) {
 	}
 	s.wincnt.init()
 
-	// Initialize super meter values, and max power for teams sharing meter
+	// Prepare next round for all players
+	for _, p := range s.chars {
+		if len(p) > 0 {
+			p[0].prepareNextRound()
+		}
+	}
+
+	// Initialize super meter values and max power for teams sharing meter
 	var level [len(s.chars)]int32
 	for i, p := range s.chars {
 		if len(p) > 0 && p[0].teamside != -1 {
-			p[0].prepareNextRound()
 			level[i] = s.wincnt.getLevel(i)
 			if s.cfg.Options.Team.PowerShare {
 				pmax := Max(s.cgi[i&1].data.power, s.cgi[i].data.power)
@@ -2212,6 +2222,7 @@ func (s *System) fight() (reload bool) {
 			}
 		}
 	}
+
 	minlv, maxlv := level[0], level[0]
 	for i, lv := range level[1:] {
 		if len(s.chars[i+1]) > 0 {
@@ -2291,7 +2302,7 @@ func (s *System) fight() (reload bool) {
 			p[0].lifeMax = Max(1, int32(math.Floor(foo*float64(lm))))
 
 			if p[0].roundsExisted() > 0 {
-				// If character already existed for a round, presumably because of turns mode, just update life
+				// If character already existed for a round, presumably because of Turns mode, just update life
 				p[0].life = Min(p[0].lifeMax, int32(math.Ceil(foo*float64(p[0].life))))
 			} else if s.round == 1 || s.tmode[i&1] == TM_Turns {
 				// If round 1 or a new character in Turns mode, initialize values
@@ -3198,24 +3209,82 @@ func (s *Select) AddStage(def string) error {
 	defer func() {
 		sys.loadTime(tnow, tstr, false, false)
 	}()
+
+	defPathFromSelect := filepath.ToSlash(def)
+	tstr = fmt.Sprintf("Stage added: %v", defPathFromSelect)
+
+	var finalDefPath string
+	isZipStage := strings.HasSuffix(strings.ToLower(defPathFromSelect), ".zip")
+
+	if isZipStage {
+		zipSearchDirs := []string{"stages/", "data/", ""}
+		var actualZipPathOnDisk string
+
+		if filepath.IsAbs(defPathFromSelect) {
+			if foundPath := FileExist(defPathFromSelect); foundPath != "" && strings.HasSuffix(strings.ToLower(foundPath), ".zip") {
+				actualZipPathOnDisk = foundPath
+			}
+		} else {
+			for _, dir := range zipSearchDirs {
+				candidateZipPath := filepath.ToSlash(filepath.Join(dir, defPathFromSelect))
+				if foundPath := FileExist(candidateZipPath); foundPath != "" && strings.HasSuffix(strings.ToLower(foundPath), ".zip") {
+					actualZipPathOnDisk = foundPath
+					break
+				}
+			}
+		}
+
+		if actualZipPathOnDisk == "" {
+			err := fmt.Errorf("stage zip not found: %s", defPathFromSelect)
+			sys.errLog.Printf("Failed to add stage, file not found: %v\n", defPathFromSelect)
+			return err
+		}
+
+		defInZip1, defInZip2 := getDefaultDefPathInZip(actualZipPathOnDisk)
+
+		candidateLogicalPath1 := filepath.ToSlash(actualZipPathOnDisk + "/" + defInZip1)
+		if FileExist(candidateLogicalPath1) != "" {
+			finalDefPath = candidateLogicalPath1
+		} else {
+			candidateLogicalPath2 := filepath.ToSlash(actualZipPathOnDisk + "/" + defInZip2)
+			if FileExist(candidateLogicalPath2) != "" {
+				finalDefPath = candidateLogicalPath2
+			} else {
+				err := fmt.Errorf("def file not found in zip: %s or %s", defInZip1, defInZip2)
+				sys.errLog.Printf("Failed to add stage, def file not found in %v: %v or %v\n", defPathFromSelect, defInZip1, defInZip2)
+				return err
+			}
+		}
+	} else {
+		if err := LoadFile(&def, []string{"stages/", "data/", ""}, func(file string) error {
+			finalDefPath = file
+			return nil
+		}); err != nil {
+			sys.errLog.Printf("Failed to add stage, file not found: %v\n", def)
+			return err
+		}
+	}
+
 	var lines []string
-	if err := LoadFile(&def, []string{"", "data/"}, func(file string) error {
-		str, err := LoadText(file)
+	var err error
+	if err = LoadFile(&finalDefPath, nil, func(file string) error {
+		var str string
+		str, err = LoadText(file)
 		if err != nil {
 			return err
 		}
 		lines = SplitAndTrim(str, "\n")
 		return nil
 	}); err != nil {
-		sys.errLog.Printf("Failed to add stage, file not found: %v\n", def)
+		sys.errLog.Printf("Failed to add stage, file not found: %s: %v\n", finalDefPath, err)
 		return err
 	}
-	tstr = fmt.Sprintf("Stage added: %v", def)
+	tstr = fmt.Sprintf("Stage added: %v", finalDefPath)
 	i, info, music, bgdef, stageinfo, lanInfo, lanMusic, lanBgdef, lanStageinfo := 0, true, true, true, true, true, true, true, true
 	var spr string
 	s.stagelist = append(s.stagelist, *newSelectStage())
 	ss := &s.stagelist[len(s.stagelist)-1]
-	ss.def = def
+	ss.def = finalDefPath
 	for i < len(lines) {
 		is, name, _ := ReadIniSection(lines, &i)
 		switch name {
@@ -3488,6 +3557,21 @@ func (l *Loader) loadCharacter(pn int, attached bool) int {
 		}
 	}
 
+	for _, ffx := range sys.ffx {
+		prefixToDecrement := true
+		for _, fxPath := range sys.cgi[pn].fxPath {
+			if ffx.fileName == fxPath {
+				prefixToDecrement = false
+				break
+			}
+		}
+		if prefixToDecrement && !ffx.isGlobal {
+			if ffx.refCount > 0 {
+				ffx.refCount--
+			}
+		}
+	}
+
 	var p *Char
 	sys.workingChar = p // This should help compiler and bytecode stay consistent
 
@@ -3501,6 +3585,9 @@ func (l *Loader) loadCharacter(pn int, attached bool) int {
 			}
 		}
 		p.clearCachedData()
+		if l.err = p.loadFx(cdef); l.err != nil {
+			sys.errLog.Printf("Error reloading FX for %s: %v", cdef, l.err)
+		}
 	} else {
 		p = newChar(pn, 0)
 		sys.cgi[pn].sff = nil
@@ -3639,6 +3726,21 @@ func (l *Loader) load() {
 	defer func() {
 		l.loadExit <- l.state
 	}()
+
+	sys.loadMutex.Lock()
+	for prefix, ffx := range sys.ffx {
+		if ffx.isGlobal {
+			continue
+		}
+		if ffx.refCount <= 0 {
+			if ffx.fsff != nil {
+				removeSFFCache(ffx.fsff.filename)
+			}
+			delete(sys.ffx, prefix)
+			//sys.errLog.Printf("Unloaded CommonFX: %s (prefix: %s)", ffx.fileName, prefix)
+		}
+	}
+	sys.loadMutex.Unlock()
 
 	charDone, stageDone := make([]bool, len(sys.chars)), false
 

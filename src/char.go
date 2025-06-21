@@ -2312,6 +2312,8 @@ type CharGlobalInfo struct {
 	remappedpal             [2]int32
 	localcoord              [2]float32
 	fnt                     [10]*Fnt
+	fightfxPrefix           string
+	fxPath                  []string
 }
 
 func (cgi *CharGlobalInfo) clearPCTime() {
@@ -2819,6 +2821,9 @@ func (c *Char) load(def string) error {
 			return filepath.ToSlash(filepath.Join(zipArchiveOfDef, baseDirWithinZip, pathInDefFile))
 		}
 		return filepath.ToSlash(filepath.Join(filepath.Dir(gi.def), pathInDefFile))
+	}
+	if err := c.loadFx(def); err != nil {
+		sys.errLog.Printf("Error loading FX for %s: %v", def, err)
 	}
 	str, err := LoadText(def)
 	if err != nil {
@@ -3564,7 +3569,103 @@ func (c *Char) loadPalette() {
 	}
 	gi.remappedpal = [2]int32{1, gi.palno}
 }
+func (c *Char) loadFx(def string) error {
+	gi := c.gi()
+	gi.fxPath = []string{} // ロード前に必ず初期化
 
+	charDefContent, err := LoadText(def)
+	if err != nil {
+		return err
+	}
+
+	// .defファイル内のパスを解決するためのヘルパー関数
+	resolvePathRelativeToDef := func(pathInDefFile string) string {
+		isZipDef, zipArchiveOfDef, defSubPathInZip := IsZipPath(def)
+		pathInDefFile = filepath.ToSlash(pathInDefFile)
+		if filepath.IsAbs(pathInDefFile) {
+			return pathInDefFile
+		}
+		if isZipRel, _, _ := IsZipPath(pathInDefFile); isZipRel {
+			return pathInDefFile
+		}
+		isEngineRootRelative := strings.HasPrefix(pathInDefFile, "data/") || strings.HasPrefix(pathInDefFile, "font/") || strings.HasPrefix(pathInDefFile, "stages/")
+		if isZipDef {
+			if isEngineRootRelative {
+				return filepath.ToSlash(filepath.Join(zipArchiveOfDef, pathInDefFile))
+			}
+			baseDirWithinZip := filepath.ToSlash(filepath.Dir(defSubPathInZip))
+			if baseDirWithinZip == "." || baseDirWithinZip == "" {
+				return filepath.ToSlash(filepath.Join(zipArchiveOfDef, pathInDefFile))
+			}
+			return filepath.ToSlash(filepath.Join(zipArchiveOfDef, baseDirWithinZip, pathInDefFile))
+		}
+		return filepath.ToSlash(filepath.Join(filepath.Dir(def), pathInDefFile))
+	}
+
+	lines, i := SplitAndTrim(charDefContent, "\n"), 0
+	info, files, lanInfo, lanFiles := true, true, true, true
+
+	for i < len(lines) {
+		isec, name, _ := ReadIniSection(lines, &i)
+		switch name {
+		case "info":
+			if info {
+				info = false
+				fightfxPrefixName, _, _ := isec.getText("fightfx.prefix")
+				gi.fightfxPrefix = strings.ToLower(fightfxPrefixName)
+			}
+		case fmt.Sprintf("%v.info", sys.cfg.Config.Language):
+			if lanInfo {
+				info = false
+				lanInfo = false
+				fightfxPrefixName, _, _ := isec.getText("fightfx.prefix")
+				gi.fightfxPrefix = strings.ToLower(fightfxPrefixName)
+			}
+		case "files":
+			if files {
+				files = false
+				if fx_paths_str, ok := isec["fx"]; ok {
+					for _, fx_path := range strings.Split(fx_paths_str, ",") {
+						fx_path = strings.TrimSpace(fx_path)
+						if fx_path == "" {
+							continue
+						}
+						resolved_fx_path := resolvePathRelativeToDef(fx_path)
+						if resolved_fx_path != "" {
+							if err := loadFightFx(resolved_fx_path, false); err != nil {
+								sys.errLog.Printf("Could not load CommonFX %s for char %s: %v", resolved_fx_path, def, err)
+							} else {
+								gi.fxPath = append(gi.fxPath, resolved_fx_path)
+							}
+						}
+					}
+				}
+			}
+		case fmt.Sprintf("%v.files", sys.cfg.Config.Language):
+			if lanFiles {
+				files = false
+				lanFiles = false
+				if fx_paths_str, ok := isec["fx"]; ok {
+					for _, fx_path := range strings.Split(fx_paths_str, ",") {
+						fx_path = strings.TrimSpace(fx_path)
+						if fx_path == "" {
+							continue
+						}
+						resolved_fx_path := resolvePathRelativeToDef(fx_path)
+						if resolved_fx_path != "" {
+							if err := loadFightFx(resolved_fx_path, false); err != nil {
+								sys.errLog.Printf("Could not load CommonFX %s for char %s: %v", resolved_fx_path, def, err)
+							} else {
+								gi.fxPath = append(gi.fxPath, resolved_fx_path)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
 func (c *Char) clearHitCount() {
 	c.hitCount = 0
 	c.uniqHitCount = 0
@@ -4119,11 +4220,19 @@ func (c *Char) getPlayerID(pn int) int32 {
 	return 0
 }
 
-func (c *Char) getPower() int32 {
-	if sys.cfg.Options.Team.PowerShare && c.teamside != -1 {
-		return sys.chars[c.playerNo&1][0].power
+// Handle power sharing
+// Neutral players (attached characters) have no apparent reasons to share power
+func (c *Char) powerOwner() *Char {
+	if sys.cfg.Options.Team.PowerShare && (c.teamside == 0 || c.teamside == 1) {
+		return sys.chars[c.teamside][0]
+		// TODO: If we ever expand on teamside switching, this could loop over sys.chars and return the first one on the player's side
+		// But currently this method is just slightly more efficient
 	}
-	return sys.chars[c.playerNo][0].power
+	return sys.chars[c.playerNo][0]
+}
+
+func (c *Char) getPower() int32 {
+	return c.powerOwner().power
 }
 
 func (c *Char) hitDefAttr(attr int32) bool {
@@ -4955,32 +5064,38 @@ func (c *Char) playSound(ffx string, lowpriority bool, loopCount int32, g, n, ch
 	if g < 0 {
 		return
 	}
+	current_ffx := ffx
+	if current_ffx == "f" {
+		if c.gi().fightfxPrefix != "" {
+			current_ffx = c.gi().fightfxPrefix
+		}
+	}
 	// Don't do anything if we have the nosound command line flag
 	if _, ok := sys.cmdFlags["-nosound"]; ok {
 		return
 	}
 	var s *Sound
-	if ffx == "" || ffx == "s" {
+	if current_ffx == "" || current_ffx == "s" {
 		if c.gi().snd != nil {
 			s = c.gi().snd.Get([...]int32{g, n})
 		}
 	} else {
-		if sys.ffx[ffx] != nil && sys.ffx[ffx].fsnd != nil {
-			s = sys.ffx[ffx].fsnd.Get([...]int32{g, n})
+		if sys.ffx[current_ffx] != nil && sys.ffx[current_ffx].fsnd != nil {
+			s = sys.ffx[current_ffx].fsnd.Get([...]int32{g, n})
 		}
 	}
 	if s == nil {
 		if log {
-			if ffx != "" {
-				sys.appendToConsole(c.warn() + fmt.Sprintf("sound %v %v,%v doesn't exist", strings.ToUpper(ffx), g, n))
+			if current_ffx != "" {
+				sys.appendToConsole(c.warn() + fmt.Sprintf("sound %v %v,%v doesn't exist", strings.ToUpper(current_ffx), g, n))
 			} else {
 				sys.appendToConsole(c.warn() + fmt.Sprintf("sound %v,%v doesn't exist", g, n))
 			}
 		}
 		if !sys.ignoreMostErrors {
 			str := "Sound doesn't exist: "
-			if ffx != "" {
-				str += ffx + ":"
+			if current_ffx != "" {
+				str += current_ffx + ":"
 			} else {
 				str += fmt.Sprintf("P%v:", c.playerNo+1)
 			}
@@ -4998,7 +5113,7 @@ func (c *Char) playSound(ffx string, lowpriority bool, loopCount int32, g, n, ch
 		ch.Play(s, g, n, loopCount, freqmul, loopstart, loopend, startposition)
 		vol = Clamp(vol, -25600, 25600)
 		//if c.gi().mugenver[0] == 1 {
-		if ffx != "" {
+		if current_ffx != "" {
 			ch.SetVolume(float32(vol * 64 / 25))
 		} else {
 			ch.SetVolume(float32(c.gi().data.volume * vol / 100))
@@ -5317,11 +5432,6 @@ func (c *Char) newHelper() (h *Char) {
 	h.size = c.size
 	h.life, h.lifeMax = c.lifeMax, c.lifeMax
 	h.powerMax = c.powerMax
-	if sys.maxPowerMode {
-		h.power = h.powerMax
-	} else {
-		h.power = 0
-	}
 	h.dizzyPoints, h.dizzyPointsMax = c.dizzyPointsMax, c.dizzyPointsMax
 	h.guardPoints, h.guardPointsMax = c.guardPointsMax, c.guardPointsMax
 	h.redLife = h.lifeMax
@@ -5580,22 +5690,28 @@ func (c *Char) getAnim(n int32, ffx string, fx bool) (a *Animation) {
 	if n == -1 {
 		return nil
 	}
-	if ffx != "" && ffx != "s" {
-		if sys.ffx[ffx] != nil && sys.ffx[ffx].fat != nil {
-			a = sys.ffx[ffx].fat.get(n)
+	current_ffx := ffx
+	if current_ffx == "f" {
+		if c.gi().fightfxPrefix != "" {
+			current_ffx = c.gi().fightfxPrefix // 固有プレフィックスで上書き
+		}
+	}
+	if current_ffx != "" && current_ffx != "s" {
+		if sys.ffx[current_ffx] != nil && sys.ffx[current_ffx].fat != nil {
+			a = sys.ffx[current_ffx].fat.get(n)
 		}
 	} else {
 		a = c.gi().anim.get(n)
 	}
 	if a == nil {
 		if fx {
-			if ffx != "" && ffx != "s" {
+			if current_ffx != "" && current_ffx != "s" {
 				sys.appendToConsole(c.warn() + fmt.Sprintf("called invalid action %v %v", strings.ToUpper(ffx), n))
 			} else {
 				sys.appendToConsole(c.warn() + fmt.Sprintf("called invalid action %v", n))
 			}
 		} else {
-			if ffx != "" && ffx != "s" {
+			if current_ffx != "" && current_ffx != "s" {
 				sys.appendToConsole(c.warn() + fmt.Sprintf("changed to invalid action %v %v", strings.ToUpper(ffx), n))
 			} else {
 				sys.appendToConsole(c.warn() + fmt.Sprintf("changed to invalid action %v", n))
@@ -5603,14 +5719,14 @@ func (c *Char) getAnim(n int32, ffx string, fx bool) (a *Animation) {
 		}
 		if !sys.ignoreMostErrors {
 			str := "Invalid action: "
-			if ffx != "" && ffx != "s" {
-				str += strings.ToUpper(ffx) + ":"
+			if current_ffx != "" && current_ffx != "s" {
+				str += strings.ToUpper(current_ffx) + ":"
 			} else {
 				str += fmt.Sprintf("P%v:", c.playerNo+1)
 			}
 			sys.errLog.Printf("%v%v\n", str, n)
 		}
-	} else if ffx != "" && ffx != "s" {
+	} else if current_ffx != "" && current_ffx != "s" {
 		a.start_scale[0] /= c.localscl
 		a.start_scale[1] /= c.localscl
 	}
@@ -6884,20 +7000,12 @@ func (c *Char) powerAdd(add int32) {
 	}
 	// Safely convert from float64 back to int32 after all calculations are done
 	int := F64toI32(float64(c.getPower()) + math.Round(float64(add)))
-	if sys.cfg.Options.Team.PowerShare && c.teamside != -1 {
-		sys.chars[c.playerNo&1][0].setPower(int)
-	} else {
-		sys.chars[c.playerNo][0].setPower(int)
-	}
+	c.powerOwner().setPower(int)
 }
 
-// This only for the PowerSet state controller
+// This is only for the PowerSet state controller
 func (c *Char) powerSet(pow int32) {
-	if sys.cfg.Options.Team.PowerShare && c.teamside != -1 {
-		sys.chars[c.playerNo&1][0].setPower(pow)
-	} else {
-		sys.chars[c.playerNo][0].setPower(pow)
-	}
+	c.powerOwner().setPower(pow)
 }
 
 func (c *Char) dizzyPointsAdd(add float64, absolute bool) {
@@ -7635,7 +7743,7 @@ func (c *Char) posUpdate() {
 	}
 
 	// Check if character is bound
-	nobind := [...]bool{c.bindTime == 0 || math.IsNaN(float64(c.bindPos[0])),
+	nobind := [3]bool{c.bindTime == 0 || math.IsNaN(float64(c.bindPos[0])),
 		c.bindTime == 0 || math.IsNaN(float64(c.bindPos[1])),
 		c.bindTime == 0 || math.IsNaN(float64(c.bindPos[2]))}
 	for i := range nobind {
@@ -8525,6 +8633,9 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 					pn = hd.playerNo
 				}
 				if getter.stateChange1(hd.p2stateno, pn) {
+					// In Mugen, using p2stateno forces movetype to H
+					// https://github.com/ikemen-engine/Ikemen-GO/issues/2466
+					getter.ss.changeMoveType(MT_H)
 					getter.setCtrl(false)
 					p2s = true
 					getter.hoIdx = -1
@@ -9044,14 +9155,13 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 				e.pausemovetime = -1
 				e.localscl = 1
 				if ffx == "" || ffx == "s" {
-					e.scale = [...]float32{c.localscl, c.localscl}
+					e.scale = [...]float32{c.localscl * sparkscale[0], c.localscl * sparkscale[1]}
 				} else if e.anim != nil {
-					e.anim.start_scale[0] *= c.localscl
-					e.anim.start_scale[1] *= c.localscl
+					e.anim.start_scale[0] *= c.localscl * sparkscale[0]
+					e.anim.start_scale[1] *= c.localscl * sparkscale[1]
 				}
 				e.setPos(p1)
 				e.anglerot[0] = sparkangle
-				e.scale = sparkscale
 				c.insertExplod(i)
 			}
 		}
@@ -9871,16 +9981,19 @@ func (c *Char) tick() {
 				c.selfState(5050, -1, -1, -1, "")
 				c.gethitBindClear()
 			} else if !bt.pause() {
-				c.bindTime -= 1
+				// c.bindTime -= 1
+				c.setBindTime(c.bindTime - 1)
 			}
 		} else {
 			if !c.pause() {
-				c.bindTime -= 1
+				// c.bindTime -= 1
+				c.setBindTime(c.bindTime - 1)
+				// The fix below was necessary before because bindTime should not be decremented directly but rather via setBindTime
 				// Fixes BindToRoot/BindToParent of 1 immediately after PosSets (MUGEN 1.0/1.1 behavior)
 				// This must not run for target binds so that they end the same time as MUGEN's do.
-				if c.bindToId > 0 {
-					c.setBindTime(c.bindTime)
-				}
+				//if c.bindToId > 0 {
+				//	c.setBindTime(c.bindTime)
+				//}
 			}
 		}
 	}
