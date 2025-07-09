@@ -5787,6 +5787,10 @@ func (c *Compiler) modifyPlayer(is IniSection, sc *StateControllerBase, _ int8) 
 			modifyPlayer_redirectid, VT_Int, 1, false); err != nil {
 			return err
 		}
+		if err := c.paramValue(is, sc, "alive",
+			modifyPlayer_alive, VT_Bool, 1, false); err != nil {
+			return err
+		}
 		if err := c.paramValue(is, sc, "lifemax",
 			modifyPlayer_lifemax, VT_Int, 1, false); err != nil {
 			return err

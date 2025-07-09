@@ -12866,7 +12866,8 @@ func (sc depth) Run(c *Char, _ []int32) bool {
 type modifyPlayer StateControllerBase
 
 const (
-	modifyPlayer_lifemax byte = iota
+	modifyPlayer_alive byte = iota
+	modifyPlayer_lifemax
 	modifyPlayer_powermax
 	modifyPlayer_dizzypointsmax
 	modifyPlayer_guardpointsmax
@@ -12890,6 +12891,13 @@ func (sc modifyPlayer) Run(c *Char, _ []int32) bool {
 	crun := c
 	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
 		switch paramID {
+		case modifyPlayer_alive:
+			a := exp[0].evalB(c)
+			if a {
+				crun.unsetSCF(SCF_ko)
+			} else {
+				crun.setSCF(SCF_ko)
+			}
 		case modifyPlayer_lifemax:
 			lm := exp[0].evalI(c)
 			if lm < 1 {
