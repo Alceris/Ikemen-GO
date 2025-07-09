@@ -360,6 +360,7 @@ var triggerMap = map[string]int{
 	"atan2":              1,
 	"attack":             1,
 	"bgmvar":             1,
+	"canhit":             1,
 	"clamp":              1,
 	"clsnoverlap":        1,
 	"clsnvar":            1,
@@ -1762,6 +1763,11 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 		}
 	case "camerazoom":
 		out.append(OC_camerazoom)
+	case "canhit":
+		if _, err := c.oneArg(out, in, rd, true); err != nil {
+			return bvNone(), err
+		}
+		out.append(OC_ex2_, OC_ex2_canhit)
 	case "canrecover":
 		out.append(OC_canrecover)
 	case "clsnoverlap":

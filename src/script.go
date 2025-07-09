@@ -3262,6 +3262,10 @@ func triggerFunctions(l *lua.LState) {
 		l.Push(lua.LNumber(sys.cam.Scale))
 		return 1
 	})
+	luaRegister(l, "canhit", func(*lua.LState) int {
+		l.Push(lua.LBool(sys.debugWC.canHitTrigger(int32(numArg(l, 1)))))
+		return 1
+	})
 	luaRegister(l, "canrecover", func(*lua.LState) int {
 		l.Push(lua.LBool(sys.debugWC.canRecover()))
 		return 1

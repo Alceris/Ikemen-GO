@@ -2664,6 +2664,28 @@ func (c *Char) clsnOverlapTrigger(box1, pid, box2 int32) bool {
 	return c.clsnCheck(getter, box1, box2, false, true, false, false)
 }
 
+func (c *Char) canHitTrigger(pid int32) bool {
+	getter := sys.playerID(pid)
+	// Invalid getter ID
+	if getter == nil {
+		return false
+	}
+
+	// Stop if either character is disabled.
+	if getter.scf(SCF_standby) || getter.scf(SCF_disabled) || c.scf(SCF_standby) || c.scf(SCF_disabled) {
+		return false
+	}
+
+	if c.id != getter.id && (c.hitdef.affectteam == 0 ||
+		((getter.teamside != c.hitdef.teamside-1) == (c.hitdef.affectteam > 0) && c.hitdef.teamside >= 0) ||
+		((getter.teamside != c.teamside) == (c.hitdef.affectteam > 0) && c.hitdef.teamside < 0)) {
+
+		// If getter can be hit by this Hitdef
+		return c.hitdef.hitonce >= 0 && !c.hasTargetOfHitdef(getter.id) && (c.hitdef.reversal_attr <= 0 || !getter.hasTargetOfHitdef(c.id)) && (getter.hittmp < 2 || c.asf(ASF_nojugglecheck) || !c.hasTarget(getter.id) || getter.ghv.getJuggle(c.id, c.gi().data.airjuggle) >= c.juggle) && getter.hittableByChar(c, &c.hitdef, c.ss.stateType, false)
+	}
+	return false
+}
+
 func (c *Char) addChild(ch *Char) {
 	for i, chi := range c.children {
 		if chi == nil {

@@ -774,6 +774,7 @@ const (
 	OC_ex2_bgmvar_position
 	OC_ex2_bgmvar_startposition
 	OC_ex2_bgmvar_volume
+	OC_ex2_canhit
 	OC_ex2_clsnvar_left
 	OC_ex2_clsnvar_top
 	OC_ex2_clsnvar_right
@@ -3169,6 +3170,8 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 	camOff := float32(0)
 	camCorrected := false
 	switch opc {
+	case OC_ex2_canhit:
+		sys.bcStack.PushB(c.canHitTrigger(sys.bcStack.Pop().ToI()))
 	case OC_ex2_index:
 		sys.bcStack.PushI(c.index)
 	case OC_ex2_isclsnproxy:
