@@ -874,6 +874,7 @@ const (
 	OC_ex2_hitdefvar_guard_dist_height_top
 	OC_ex2_hitdefvar_guard_dist_width_back
 	OC_ex2_hitdefvar_guard_dist_width_front
+	OC_ex2_hitdefvar_affectteam
 	OC_ex2_hitdefvar_guard_pausetime
 	OC_ex2_hitdefvar_guard_shaketime
 	OC_ex2_hitdefvar_guard_sparkno
@@ -894,6 +895,7 @@ const (
 	OC_ex2_hitdefvar_sparkno
 	OC_ex2_hitdefvar_sparkx
 	OC_ex2_hitdefvar_sparky
+	OC_ex2_hitdefvar_teamside
 	OC_ex2_hitbyattr
 	OC_ex2_soundvar_group
 	OC_ex2_soundvar_number
@@ -3673,6 +3675,8 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushI(c.hitdef.guard_sparkno)
 	case OC_ex2_hitdefvar_guarddamage:
 		sys.bcStack.PushI(c.hitdef.guarddamage)
+	case OC_ex2_hitdefvar_affectteam:
+		sys.bcStack.PushI(c.hitdef.affectteam)
 	case OC_ex2_hitdefvar_guardflag:
 		attr := (*(*int32)(unsafe.Pointer(&be[*i])))
 		sys.bcStack.PushB(
@@ -3713,6 +3717,8 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushF(c.hitdef.sparkxy[0] * (c.localscl / oc.localscl))
 	case OC_ex2_hitdefvar_sparky:
 		sys.bcStack.PushF(c.hitdef.sparkxy[1] * (c.localscl / oc.localscl))
+	case OC_ex2_hitdefvar_teamside:
+		sys.bcStack.PushI(int32(c.hitdef.teamside))
 	// HitByAttr
 	case OC_ex2_hitbyattr:
 		sys.bcStack.PushB(c.hitByAttrTrigger(*(*int32)(unsafe.Pointer(&be[*i]))))
