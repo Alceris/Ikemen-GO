@@ -3303,6 +3303,28 @@ func (c *Compiler) hitOverride(is IniSection, sc *StateControllerBase, _ int8) (
 			hitOverride_forceair, VT_Bool, 1, false); err != nil {
 			return err
 		}
+		gflg := func(id byte, data string) error {
+			var flg int32
+			for _, c := range data {
+				switch c {
+				case 'H', 'h':
+					flg |= int32(HF_H)
+				case 'L', 'l':
+					flg |= int32(HF_L)
+				case 'M', 'm':
+					flg |= int32(HF_H | HF_L)
+				case 'A', 'a':
+					flg |= int32(HF_A)
+				}
+			}
+			sc.add(id, sc.iToExp(flg))
+			return nil
+		}
+		if err := c.stateParam(is, "guardflag", false, func(data string) error {
+			return gflg(hitOverride_guardflag, data)
+		}); err != nil {
+			return err
+		}
 		if err := c.paramValue(is, sc, "keepstate",
 			hitOverride_keepstate, VT_Bool, 1, false); err != nil {
 			return err

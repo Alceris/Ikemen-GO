@@ -975,6 +975,7 @@ type HitOverride struct {
 	stateno   int32
 	time      int32
 	forceair  bool
+	guardflag int32
 	keepState bool
 	playerNo  int
 }
@@ -8689,10 +8690,10 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 				if ho.attr&hd.attr&int32(ST_MASK) == 0 {
 					continue
 				}
-			} else {
-				if ho.attr&int32(c.ss.stateType) == 0 {
-					continue
-				}
+			} else if ho.attr&int32(c.ss.stateType) == 0 {
+				continue
+			} else if ho.guardflag != 0 && (c.asf(ASF_unguardable) || ho.guardflag&hd.guardflag == 0) {
+				continue
 			}
 			// Miss if using p1stateno or p2stateno and HitOverride together
 			if hd.missonoverride == 1 || (hd.missonoverride == -1 && !isProjectile && Abs(hitResult) == 1 &&

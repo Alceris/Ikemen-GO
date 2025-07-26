@@ -9395,13 +9395,14 @@ const (
 	hitOverride_stateno
 	hitOverride_time
 	hitOverride_forceair
+	hitOverride_guardflag
 	hitOverride_keepstate
 	hitOverride_redirectid
 )
 
 func (sc hitOverride) Run(c *Char, _ []int32) bool {
 	crun := c
-	var a, s, st, t int32 = 0, 0, -1, 1
+	var a, gf, s, st, t int32 = 0, 0, 0, -1, 1
 	f := false
 	ks := false
 	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
@@ -9422,6 +9423,8 @@ func (sc hitOverride) Run(c *Char, _ []int32) bool {
 			}
 		case hitOverride_forceair:
 			f = exp[0].evalB(c)
+		case hitOverride_guardflag:
+			gf = exp[0].evalI(c)
 		case hitOverride_keepstate:
 			if st == -1 { // StateNo disables KeepState
 				ks = exp[0].evalB(c)
@@ -9439,7 +9442,7 @@ func (sc hitOverride) Run(c *Char, _ []int32) bool {
 		t = 0
 	}
 	pn := crun.playerNo
-	crun.ho[s] = HitOverride{attr: a, stateno: st, time: t, forceair: f, keepState: ks, playerNo: pn}
+	crun.ho[s] = HitOverride{attr: a, stateno: st, time: t, forceair: f, guardflag: gf, keepState: ks, playerNo: pn}
 	return false
 }
 
