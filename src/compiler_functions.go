@@ -948,6 +948,10 @@ func (c *Compiler) explodSub(is IniSection,
 		explod_removeonchangestate, VT_Bool, 1, false); err != nil {
 		return err
 	}
+	if err := c.paramValue(is, sc, "hideonpausemenu",
+		explod_hideonpausemenu, VT_Bool, 1, false); err != nil {
+		return err
+	}
 	if err := c.paramTrans(is, sc, "", explod_trans, true); err != nil {
 		return err
 	}
@@ -2258,8 +2262,8 @@ func (c *Compiler) hitDefSub(is IniSection, sc *StateControllerBase) error {
 		hitDef_crouch_friction, VT_Float, 1, false); err != nil {
 		return err
 	}
-	if err := c.paramValue(is, sc, "missonreversaldef",
-		hitDef_missonreversaldef, VT_Bool, 1, false); err != nil {
+	if err := c.paramValue(is, sc, "ignorereversaldef",
+		hitDef_ignorereversaldef, VT_Bool, 1, false); err != nil {
 		return err
 	}
 
@@ -4325,6 +4329,10 @@ func (c *Compiler) zoom(is IniSection, sc *StateControllerBase, _ int8) (StateCo
 		}
 		if err := c.paramValue(is, sc, "lag",
 			zoom_lag, VT_Float, 1, false); err != nil {
+			return err
+		}
+		if err := c.paramValue(is, sc, "endlag",
+			zoom_endlag, VT_Float, 1, false); err != nil {
 			return err
 		}
 		if err := c.paramValue(is, sc, "camerabound",
@@ -6678,12 +6686,16 @@ func (c *Compiler) getHitVarSet(is IniSection, sc *StateControllerBase, _ int8) 
 			getHitVarSet_hittime, VT_Int, 1, false); err != nil {
 			return err
 		}
-		if err := c.paramValue(is, sc, "id",
-			getHitVarSet_id, VT_Int, 1, false); err != nil {
+		if err := c.paramValue(is, sc, "playerid",
+			getHitVarSet_playerid, VT_Int, 1, false); err != nil {
 			return err
 		}
 		if err := c.paramValue(is, sc, "playerno",
 			getHitVarSet_playerno, VT_Int, 1, false); err != nil {
+			return err
+		}
+		if err := c.paramValue(is, sc, "projid",
+			getHitVarSet_projid, VT_Int, 1, false); err != nil {
 			return err
 		}
 		if err := c.paramValue(is, sc, "redlife",
@@ -6696,6 +6708,10 @@ func (c *Compiler) getHitVarSet(is IniSection, sc *StateControllerBase, _ int8) 
 		}
 		if err := c.paramValue(is, sc, "slidetime",
 			getHitVarSet_slidetime, VT_Int, 1, false); err != nil {
+			return err
+		}
+		if err := c.paramValue(is, sc, "teamside",
+			getHitVarSet_teamside, VT_Int, 1, false); err != nil {
 			return err
 		}
 		if err := c.paramValue(is, sc, "xvel",

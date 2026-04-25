@@ -107,15 +107,7 @@ type SystemStateVars struct {
 	reloadFightScreenFlg    bool
 	reloadCharSlot          [MaxPlayerNo]bool
 	turbo                   float32
-	drawScale               float32
-	zoomlag                 float32
-	zoomScale               float32
-	zoomPosXLag             float32
-	zoomPosYLag             float32
-	enableZoomtime          int32
-	zoomCameraBound         bool
-	zoomStageBound          bool
-	zoomPos                 [2]float32
+	zoom                    ZoomEffect
 	finishType              FinishType
 	winwaittime             int32
 	slowtime                int32
@@ -229,6 +221,7 @@ type System struct {
 	debugLastID         int32
 	soundMixer          *beep.Mixer
 	bgm                 Bgm
+	pauseVolumeApplied  bool
 	soundChannels       SoundChannels // System sounds. Lifebars etc
 	charSoundChannels   [MaxPlayerNo]SoundChannels
 	allPalFX            *PalFX
@@ -358,6 +351,11 @@ type System struct {
 	// Must live on System because rollback temporarily steals sys.netConnection.
 	netplayOverride SessionConfigOverride
 	sessionWarning  string
+}
+
+type drawAspectState struct {
+	gameWidth, gameHeight   int32
+	widthScale, heightScale float32
 }
 
 // Check if the application is running inside a macOS app bundle
@@ -673,6 +671,53 @@ func (s *System) applyFightAspect() {
 	s.heightScale = float32(s.scrrect[3]) / float32(s.gameHeight)
 }
 
+func (s *System) captureAspectState() drawAspectState {
+	return drawAspectState{
+		gameWidth:   s.gameWidth,
+		gameHeight:  s.gameHeight,
+		widthScale:  s.widthScale,
+		heightScale: s.heightScale,
+	}
+}
+
+func (s *System) restoreAspectState(st drawAspectState) {
+	s.gameWidth = st.gameWidth
+	s.gameHeight = st.gameHeight
+	s.widthScale = st.widthScale
+	s.heightScale = st.heightScale
+}
+
+func (s *System) wrapDrawWithAspectState(fn func()) func() {
+	if fn == nil {
+		return nil
+	}
+	st := s.captureAspectState()
+	return func() {
+		prev := s.captureAspectState()
+		s.restoreAspectState(st)
+		defer s.restoreAspectState(prev)
+		fn()
+	}
+}
+
+func (s *System) shouldPersistMotifAspect() bool {
+	return s.cfg.Video.KeepAspect && !s.skipMotifScaling()
+}
+
+func (s *System) enterMotifAspect() {
+	if !s.shouldPersistMotifAspect() {
+		return
+	}
+	s.setGameSize(s.scrrect[2], s.scrrect[3])
+}
+
+func (s *System) leaveMotifAspect() {
+	if !s.shouldPersistMotifAspect() {
+		return
+	}
+	s.applyFightAspect()
+}
+
 func (s *System) eventUpdate() bool {
 	s.esc = false
 	for _, v := range s.shortcutScripts {
@@ -784,50 +829,19 @@ func (s *System) await(fps int) bool {
 func (s *System) renderFrame() {
 	if !s.frameSkip {
 		x, y, scl := s.cam.Pos[0], s.cam.Pos[1], s.cam.Scale/s.cam.BaseScale()
-		dx, dy, dscl := x, y, scl
-		if s.enableZoomtime > 0 {
-			if !s.debugPaused() {
-				s.zoomPosXLag += ((s.zoomPos[0] - s.zoomPosXLag) * (1 - s.zoomlag))
-				s.zoomPosYLag += ((s.zoomPos[1] - s.zoomPosYLag) * (1 - s.zoomlag))
-				s.drawScale = s.drawScale / (s.drawScale + (s.zoomScale*scl-s.drawScale)*s.zoomlag) * s.zoomScale * scl
-			}
-			if s.zoomStageBound {
-				dscl = Max(s.cam.MinScale, s.drawScale/s.cam.BaseScale())
-				if s.zoomCameraBound {
-					zoomedViewWidth := float32(s.gameWidth) / s.drawScale
-					minCamX := x - (s.cam.halfWidth/scl - zoomedViewWidth/2)
-					maxCamX := x + (s.cam.halfWidth/scl - zoomedViewWidth/2)
-					intermediateTargetX := x + s.zoomPosXLag/scl
-					dx = Clamp(intermediateTargetX, minCamX, maxCamX)
-				} else {
-					dx = x + s.zoomPosXLag/scl
-				}
-				dx = s.cam.XBound(dscl, dx)
-			} else {
-				dscl = s.drawScale / s.cam.BaseScale()
-				dx = x + s.zoomPosXLag/scl
-			}
-			dy = y + s.zoomPosYLag/scl
-		} else {
-			s.zoomlag = 0
-			s.zoomPosXLag = 0
-			s.zoomPosYLag = 0
-			s.zoomScale = 1
-			s.zoomPos = [2]float32{0, 0}
-			s.drawScale = s.cam.Scale
-		}
+		dx, dy, dscl := s.zoom.apply(x, y, scl)
 		s.draw(dx, dy, dscl)
+	}
+
+	// Lua
+	if !s.frameSkip {
+		s.luaFlushDrawQueue()
 	} else {
 		// Keep pause-menu logic responsive even when this render frame is skipped.
 		// Any queued draw ops are discarded below because this frame is not being rendered.
 		if s.motif.me.active {
 			s.motif.me.runLua(&s.motif)
 		}
-	}
-
-	if !s.frameSkip {
-		s.luaFlushDrawQueue()
-	} else {
 		// On skipped frames, discard queued draws to avoid buildup.
 		s.luaDiscardDrawQueue()
 	}
@@ -913,18 +927,34 @@ func (s *System) tickSound() {
 	// Always pause if noMusic flag set, pause master volume is 0, or freqmul is 0.
 	s.bgm.SetPaused(s.nomusic || (s.paused && s.cfg.Sound.PauseMasterVolume == 0) || (s.bgm.freqmul == 0))
 
-	// Set BGM volume if paused
-	if s.paused && s.bgm.volRestore == 0 {
-		s.bgm.volRestore = s.bgm.bgmVolume
-		s.bgm.bgmVolume = int(s.cfg.Sound.PauseMasterVolume * s.bgm.bgmVolume / 100.0)
-		s.bgm.UpdateVolume()
+	if s.paused {
+		// Apply BGM pause volume once per pause, even when the original BGM volume is 0.
+		// volRestore cannot be used as the latch because 0 is a valid volume.
+		if !s.bgm.pauseVolumeApplied {
+			s.bgm.volRestore = s.bgm.bgmVolume
+			s.bgm.bgmVolume = int(s.cfg.Sound.PauseMasterVolume * s.bgm.bgmVolume / 100.0)
+			s.bgm.UpdateVolume()
+			s.bgm.pauseVolumeApplied = true
+		}
+
+		// Run every paused tick so sounds started while paused are also softened.
+		s.pauseVolumeApplied = true
 		s.softenAllSound()
-	} else if !s.paused && s.bgm.volRestore > 0 {
-		// Restore all volume
+	} else if s.pauseVolumeApplied || s.bgm.pauseVolumeApplied {
+		s.restorePauseVolume()
+	}
+}
+
+func (s *System) restorePauseVolume() {
+	if s.bgm.pauseVolumeApplied {
 		s.bgm.bgmVolume = s.bgm.volRestore
 		s.bgm.volRestore = 0
+		s.bgm.pauseVolumeApplied = false
 		s.bgm.UpdateVolume()
+	}
+	if s.pauseVolumeApplied {
 		s.restoreAllVolume()
+		s.pauseVolumeApplied = false
 	}
 }
 
@@ -1731,12 +1761,14 @@ func (s *System) luaQueuePreDraw(fn func()) {
 	if fn == nil {
 		return
 	}
+	fn = s.wrapDrawWithAspectState(fn)
 	s.luaDrawPreOps = append(s.luaDrawPreOps, fn)
 }
 func (s *System) luaQueueLayerDraw(layer int, fn func()) {
 	if fn == nil {
 		return
 	}
+	fn = s.wrapDrawWithAspectState(fn)
 	// Negative layers behave like a "pre" pass (e.g. clearColor).
 	if layer < 0 {
 		s.luaQueuePreDraw(fn)
@@ -2005,6 +2037,7 @@ func (s *System) resetGblEffect() {
 	s.allPalFX.clear()
 	s.bgPalFX.clear()
 	s.envShake.clear()
+	s.zoom.reset()
 	s.pausetime, s.pausetimebuffer = 0, 0
 	s.supertime, s.supertimebuffer = 0, 0
 	s.envcol_time = 0
@@ -2031,10 +2064,11 @@ func (s *System) softenAllSound() {
 			ch := &s.charSoundChannels[i][j]
 
 			// Temporarily store the volume so it can be recalled later.
-			if ch.IsPlaying() && ch.sfx != nil && ch.ctrl != nil {
+			if ch.IsPlaying() && ch.sfx != nil && ch.ctrl != nil && !ch.pauseVolumeApplied {
 				ch.volResume = ch.sfx.volume
 				softVolume := ch.sfx.volume * (float32(s.cfg.Sound.PauseMasterVolume) / 100.0)
 				ch.SetVolume(softVolume)
+				ch.pauseVolumeApplied = true
 
 				// Pause if pause master volume is 0
 				if s.cfg.Sound.PauseMasterVolume == 0 {
@@ -2052,8 +2086,9 @@ func (s *System) restoreAllVolume() {
 			ch := &s.charSoundChannels[i][j]
 
 			// Restore the volume we had.
-			if ch.sfx != nil && ch.ctrl != nil {
+			if ch.sfx != nil && ch.ctrl != nil && ch.pauseVolumeApplied {
 				ch.SetVolume(ch.volResume)
+				ch.pauseVolumeApplied = false
 
 				// Unpause only those whose freqmul > 0
 				if ch.ctrl.Paused && ch.sfx.freqmul > 0 {
@@ -2116,6 +2151,7 @@ func (s *System) clearPlayerAssets(pn int, forceDestroy bool) {
 
 func (s *System) resetRoundState() {
 	s.roundBackup.Restore()
+	newMatchMusic := s.round == 1 && !s.roundResetFlg
 
 	if s.sel.gameParams.PersistRounds && !s.roundResetFlg {
 		s.persistRoundCount++
@@ -2123,6 +2159,7 @@ func (s *System) resetRoundState() {
 
 	s.resetFrameTime()
 
+	s.restorePauseVolume()
 	s.paused = false
 	s.introSkipCall = false
 	s.roundResetFlg = false
@@ -2199,6 +2236,11 @@ func (s *System) resetRoundState() {
 		s.stage.reset()
 	}
 	s.cam.ResetZoomdelay()
+	if newMatchMusic {
+		s.stage.music.ClearSelection()
+		s.stage.si().music.ClearSelection()
+		s.sel.music.ClearSelection()
+	}
 
 	// Reset characters
 	for i, p := range s.chars {
@@ -2229,6 +2271,9 @@ func (s *System) resetRoundState() {
 		}
 		s.cgi[i].clearPCTime()
 
+		if newMatchMusic {
+			p[0].si().music.ClearSelection()
+		}
 		// Reset music map
 		s.cgi[i].music = make(Music)
 		// Append stage def file music parameters
@@ -2260,8 +2305,8 @@ func (s *System) resetRoundState() {
 		// Select anim 0
 		firstAnim := int32(0)
 		// Default to first anim in .AIR if 0 was not found
-		if p[0].gi().animTable[0] == nil {
-			for k := range p[0].gi().animTable {
+		if p[0].gi().animTable.anims[0] == nil {
+			for k := range p[0].gi().animTable.anims {
 				firstAnim = k
 				break
 			}
@@ -2458,6 +2503,10 @@ func (s *System) action() {
 	// Update: In Mugen, the state change to win pose happens before the character code runs. It's evidence this should be placed before charList.action()
 	s.stepRoundState()
 
+	// In version 0.99 this was moved to before sys.action() for undocumented reasons
+	// Moving it here preserves whatever behavior that implemented while not keeping the stage oddly outside the main loop
+	s.stage.action()
+
 	// Run "tick frame"
 	if s.tickFrame() {
 		// X axis player limits
@@ -2476,18 +2525,12 @@ func (s *System) action() {
 		// Z axis player limits
 		s.zmin = s.stage.topbound * s.stage.localscl
 		s.zmax = s.stage.botbound * s.stage.localscl
-		s.allPalFX.step()
 		//s.bgPalFX.step()
 		s.envShake.next()
 		if s.envcol_time > 0 {
 			s.envcol_time--
 		}
-		if s.enableZoomtime > 0 {
-			s.enableZoomtime--
-		} else {
-			s.zoomCameraBound = true
-			s.zoomStageBound = true
-		}
+		s.zoom.update()
 		if s.supertime > 0 {
 			s.supertime--
 		} else if s.pausetime > 0 {
@@ -2510,6 +2553,8 @@ func (s *System) action() {
 			s.specialFlag = (s.specialFlag&GSF_nokoslow | s.specialFlag&GSF_timerfreeze)
 		}
 		s.charList.action()
+		s.allPalFX.step()
+		s.bgPalFX.step()
 		s.nomusic = s.gsf(GSF_nomusic) && !sys.postMatchFlg
 	}
 
@@ -2947,7 +2992,8 @@ func (s *System) stepRoundState() {
 	// Post round
 	if s.roundEnded() || s.roundEndDecision() {
 		rs4t := -s.fightScreen.round.over_waittime
-		fadeoutStart := rs4t - 2 - s.fightScreen.round.overTime() + s.fightScreen.round.fadeOut.time
+		fadeOutDuration := s.fightScreen.round.fadeOut.duration()
+		fadeoutStart := rs4t - 2 - s.fightScreen.round.overTime() + fadeOutDuration
 		matchEndDialoguePending := s.matchEndDialoguePending()
 
 		s.intro--
@@ -3640,10 +3686,6 @@ func (s *System) runMatch() (reload bool) {
 			break
 		}
 
-		// TODO: These probably ought to be in action() as well
-		s.bgPalFX.step()
-		s.stage.action()
-
 		// Update game state
 		s.action()
 
@@ -3773,7 +3815,7 @@ func (s *System) SetupCharRoundStart() {
 			}
 
 			// Apply life options
-			lmax *= p[0].ocd().lifeRatio * s.cfg.Options.Life / 100
+			lmax *= s.cfg.Options.Life / 100
 
 			// Adjust life by team mode
 			if p[0].teamside != -1 {
@@ -3793,9 +3835,9 @@ func (s *System) SetupCharRoundStart() {
 							if len(s.chars[j]) > 0 {
 								var charLm float32
 								if s.chars[j][0].ocd().lifeMax > 0 {
-									charLm = float32(s.chars[j][0].ocd().lifeMax) * s.chars[j][0].ocd().lifeRatio * s.cfg.Options.Life / 100
+									charLm = float32(s.chars[j][0].ocd().lifeMax) * s.cfg.Options.Life / 100
 								} else {
-									charLm = float32(s.chars[j][0].gi().data.life) * s.chars[j][0].ocd().lifeRatio * s.cfg.Options.Life / 100
+									charLm = float32(s.chars[j][0].gi().data.life) * s.cfg.Options.Life / 100
 								}
 								totalTeamLife += charLm
 								teamSize++
@@ -4133,7 +4175,6 @@ type SelectChar struct {
 	intro         string
 	ending        string
 	arcadepath    string
-	ratiopath     string
 	movelist      string
 	pal           []int32
 	pal_defaults  []int32
@@ -4512,7 +4553,6 @@ func (s *Select) AddChar(def string) *SelectChar {
 				sc.intro, _, _ = isec.getText("intro.storyboard")
 				sc.ending, _, _ = isec.getText("ending.storyboard")
 				sc.arcadepath, _, _ = isec.getText("arcadepath")
-				sc.ratiopath, _, _ = isec.getText("ratiopath")
 			}
 		}
 	}
@@ -4553,7 +4593,8 @@ func (s *Select) AddChar(def string) *SelectChar {
 				return err
 			}
 			lines, lnidx := SplitAndTrim(str, "\n"), 0
-			at := ReadAnimationTable(tempSff, &tempSff.palList, lines, &lnidx) // SFF here is temporary
+			// We disable logging here or else preloading will print the errors of all characters in the select screen
+			at := ReadAnimationTable(sc.def, tempSff, &tempSff.palList, lines, &lnidx, false)
 			for v_anim := range s.charAnimPreload {
 				if animation := at.get(v_anim); animation != nil {
 					sc.anims.addAnim(animation, v_anim)
@@ -4813,7 +4854,7 @@ func (s *Select) AddStage(def string) (*SelectStage, error) {
 		sff := newSff()
 		// preload animations
 		atidx := 0
-		at := ReadAnimationTable(sff, &sff.palList, lines, &atidx)
+		at := ReadAnimationTable(finalDefPath, sff, &sff.palList, lines, &atidx, false)
 		for v := range s.stageAnimPreload {
 			if anim := at.get(v); anim != nil {
 				ss.anims.addAnim(anim, v)
@@ -5013,7 +5054,7 @@ func (l *Loader) loadCharacter(pn int, attached bool) int {
 				break
 			}
 		}
-		if prefixToDecrement && !ffx.isGlobal {
+		if prefixToDecrement && ffx.isCharFX {
 			if ffx.refCount > 0 {
 				ffx.refCount--
 			}
@@ -5028,6 +5069,10 @@ func (l *Loader) loadCharacter(pn int, attached bool) int {
 
 	if sameChar {
 		p = sys.chars[pn][0]
+
+		// The cached instance is being reused as a fresh entrant.
+		// Restore values that ModifyPlayer may have mutated.
+		p.resetCachedPlayerState()
 
 		// Prepare success message
 		if attached {
@@ -5112,6 +5157,11 @@ func (l *Loader) loadCharacter(pn int, attached bool) int {
 		selectPalno = sys.sel.selected[pn&1][memberNo][1]
 	}
 	sys.cgi[pn].palno = int32(selectPalno)
+
+	// Apply per-launch map overrides prepared from Lua/loadStart.
+	if !attached {
+		p.applyMapOverrides()
+	}
 
 	// Prepare fight screen portraits and names for Turns mode
 	if !attached {
@@ -5309,11 +5359,19 @@ func (l *Loader) load() {
 	sys.fightScreen.setScale()
 	//sys.motif.setMotifScale()
 
+	// Load any config-driven Common FX not already cached. External modules may
+	// append to Common.Fx before a match; once loaded, non-char FX are kept.
+	if err := loadCommonFightFx(sys.fightScreen.def, false); err != nil {
+		l.err = err
+		l.state = LS_Error
+		return
+	}
+
 	/*
 		// This should now be handled by loadSff()
 		sys.loadMutex.Lock()
 		for prefix, ffx := range sys.ffx {
-			if ffx.isGlobal {
+			if !ffx.isCharFX {
 				continue
 			}
 			if ffx.refCount <= 0 {
@@ -5466,6 +5524,127 @@ func (es *EnvShake) getOffset() [2]float32 {
 			offset * float32(math.Cos(float64(-es.dir)))}
 	}
 	return [2]float32{0, 0}
+}
+
+type ZoomEffect struct {
+	active      bool
+	time        int32
+	lag         float32
+	endLag      float32
+	scale       float32
+	curScale    float32
+	pos         [2]float32 // Defined parameters
+	curPos      [2]float32 // Current values with lag
+	cameraBound bool
+	stageBound  bool
+}
+
+func (z *ZoomEffect) reset() {
+	z.active = false
+	z.time = 0
+	z.pos = [2]float32{0, 0}
+	z.curPos = [2]float32{0, 0}
+	z.scale = 1
+	z.curScale = 1
+	z.lag = 0
+	z.endLag = 0
+	z.cameraBound = true
+	z.stageBound = true
+}
+
+// Step the zoom variables
+func (z *ZoomEffect) update() {
+	if !z.active {
+		return
+	}
+
+	// Active phase target
+	targetPos := z.pos
+	targetScale := z.scale
+	lag := z.lag
+
+	// Release phase target
+	if z.time <= 0 {
+		targetPos = [2]float32{0, 0}
+		targetScale = 1
+		lag = z.endLag
+	}
+
+	// Manage timer
+	if z.time > 0 {
+		z.time--
+	}
+
+	// Threshold for snapping to target
+	const eps = 0.001
+
+	// Apply smoothing
+	if lag == 0 {
+		// Fast path for no lag
+		z.curPos = targetPos
+		z.curScale = targetScale
+	} else if lag < 1 {
+		// Position
+		for i := 0; i < 2; i++ {
+			if Abs(z.curPos[i]-targetPos[i]) < eps {
+				z.curPos[i] = targetPos[i]
+			} else {
+				z.curPos[i] += (targetPos[i] - z.curPos[i]) * (1 - lag)
+			}
+		}
+
+		// Scale
+		if Abs(z.curScale-targetScale) < eps {
+			z.curScale = targetScale
+		} else {
+			z.curScale += (targetScale - z.curScale) * (1 - lag)
+		}
+	}
+	// lag >= 1 freezes current zoom state. Maybe that shouldn't be allowed either?
+
+	// Finish release
+	if z.time <= 0 {
+		if Abs(z.curPos[0]) < eps &&
+			Abs(z.curPos[1]) < eps &&
+			Abs(z.curScale-1) < eps {
+			z.reset()
+		}
+	}
+}
+
+// Apply current zoom to sys.draw() parameters
+func (z *ZoomEffect) apply(x, y, scl float32) (dx, dy, dscl float32) {
+	dx, dy, dscl = x, y, scl
+
+	if !z.active {
+		return
+	}
+
+	finalScale := z.curScale * scl
+
+	// Apply position limits
+	if z.stageBound {
+		dscl = Max(sys.cam.MinScale, finalScale/sys.cam.BaseScale())
+
+		if z.cameraBound {
+			zoomedViewWidth := float32(sys.gameWidth) / finalScale
+			minCamX := x - (sys.cam.halfWidth/scl - zoomedViewWidth/2)
+			maxCamX := x + (sys.cam.halfWidth/scl - zoomedViewWidth/2)
+			intermediateTargetX := x + z.curPos[0]/scl
+			dx = Clamp(intermediateTargetX, minCamX, maxCamX)
+		} else {
+			dx = x + z.curPos[0]/scl
+		}
+
+		dx = sys.cam.XBound(dscl, dx)
+	} else {
+		dscl = finalScale / sys.cam.BaseScale()
+		dx = x + z.curPos[0]/scl
+	}
+
+	dy = y + z.curPos[1]/scl
+
+	return
 }
 
 type CharVarBackup struct {

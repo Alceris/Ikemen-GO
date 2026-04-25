@@ -574,6 +574,7 @@ const (
 	OC_ex_gethitvar_playerid
 	OC_ex_gethitvar_playerno
 	OC_ex_gethitvar_projid
+	OC_ex_gethitvar_teamside
 	OC_ex_gethitvar_redlife
 	OC_ex_gethitvar_score
 	OC_ex_gethitvar_hitdamage
@@ -701,7 +702,6 @@ const (
 	OC_ex_playerindexexist
 	OC_ex_playernoexist
 	OC_ex_randomrange
-	OC_ex_ratiolevel
 	OC_ex_receiveddamage
 	OC_ex_receivedhits
 	OC_ex_redlife
@@ -828,6 +828,7 @@ const (
 	OC_ex2_explodvar_animplayerno
 	OC_ex2_explodvar_animtime
 	OC_ex2_explodvar_spriteplayerno
+	OC_ex2_explodvar_bindid
 	OC_ex2_explodvar_bindtime
 	OC_ex2_explodvar_drawpal_group
 	OC_ex2_explodvar_drawpal_index
@@ -938,6 +939,7 @@ const (
 	OC_ex2_gamevar_persistrounds
 	OC_ex2_gamevar_persistlife
 	OC_ex2_gamevar_persistmusic
+	OC_ex2_gamevar_hidebars
 	OC_ex2_topbounddist
 	OC_ex2_topboundbodydist
 	OC_ex2_botbounddist
@@ -961,12 +963,14 @@ const (
 	OC_ex2_zoomvar_pos_x
 	OC_ex2_zoomvar_pos_y
 	OC_ex2_zoomvar_lag
+	OC_ex2_zoomvar_endlag
 	OC_ex2_zoomvar_time
 	OC_ex2_projclsnoverlap
 	OC_ex2_attackmul
 	OC_ex2_defencemul
 	OC_ex2_guardcount
 	OC_ex2_airjumpcount
+	OC_ex2_parentexist
 	OC_ex2_shader
 )
 const (
@@ -3197,6 +3201,8 @@ func (be BytecodeExp) run_ex(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushB(c.ghv.keepstate)
 	case OC_ex_gethitvar_guardko:
 		sys.bcStack.PushB(c.ghv.guardko)
+	case OC_ex_gethitvar_teamside:
+		sys.bcStack.PushI(int32(c.ghv.teamside) + 1)
 	case OC_ex_ailevelf:
 		if c.asf(ASF_noailevel) {
 			sys.bcStack.PushI(0)
@@ -3256,8 +3262,7 @@ func (be BytecodeExp) run_ex(c *Char, i *int, oc *Char) {
 	case OC_ex_spriteplayerno:
 		sys.bcStack.PushI(int32(c.spritePN) + 1)
 	case OC_ex_attack:
-		base := float32(c.gi().attackBase) * c.ocd().attackRatio / 100
-		sys.bcStack.PushF(base * c.attackMul[0] * 100)
+		sys.bcStack.PushF(float32(c.gi().attackBase) * c.attackMul[0])
 	case OC_ex_clsnoverlap:
 		c2 := sys.bcStack.Pop().ToI()
 		id := sys.bcStack.Pop().ToI()
@@ -3445,8 +3450,6 @@ func (be BytecodeExp) run_ex(c *Char, i *int, oc *Char) {
 	case OC_ex_randomrange:
 		v2 := sys.bcStack.Pop()
 		be.random(sys.bcStack.Top(), v2)
-	case OC_ex_ratiolevel:
-		sys.bcStack.PushI(c.ocd().ratioLevel)
 	case OC_ex_receiveddamage:
 		sys.bcStack.PushI(c.receivedDmg)
 	case OC_ex_receivedhits:
@@ -3795,6 +3798,8 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		fallthrough
 	case OC_ex2_explodvar_id:
 		fallthrough
+	case OC_ex2_explodvar_bindid:
+		fallthrough
 	case OC_ex2_explodvar_bindtime:
 		fallthrough
 	case OC_ex2_explodvar_time:
@@ -3967,7 +3972,7 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 			case OC_ex2_projvar_supermovetime:
 				sys.bcStack.PushI(p.supermovetime)
 			case OC_ex2_projvar_teamside:
-				sys.bcStack.PushI(int32(p.hitdef.teamside))
+				sys.bcStack.PushI(int32(p.hitdef.teamside) + 1)
 			case OC_ex2_projvar_time:
 				sys.bcStack.PushI(p.time)
 			case OC_ex2_projvar_vel_x:
@@ -4035,12 +4040,14 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushI(sys.getSlowtime())
 	case OC_ex2_gamevar_superpausetime:
 		sys.bcStack.PushI(sys.supertime)
-	case OC_ex2_gamevar_persistrounds:
-		sys.bcStack.PushB(sys.sel.gameParams.PersistRounds)
 	case OC_ex2_gamevar_persistlife:
 		sys.bcStack.PushB(sys.sel.gameParams.PersistLife)
 	case OC_ex2_gamevar_persistmusic:
 		sys.bcStack.PushB(sys.sel.gameParams.PersistMusic)
+	case OC_ex2_gamevar_persistrounds:
+		sys.bcStack.PushB(sys.sel.gameParams.PersistRounds)
+	case OC_ex2_gamevar_hidebars:
+		sys.bcStack.PushB(sys.lifebarHide || sys.dialogueBarsFlg)
 	// HitByAttr
 	case OC_ex2_hitbyattr:
 		attr := be.ReadIntAt(i)
@@ -4133,15 +4140,17 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 	case OC_ex2_xshear:
 		sys.bcStack.PushF(c.xshear)
 	case OC_ex2_zoomvar_scale:
-		sys.bcStack.PushF(sys.drawScale)
+		sys.bcStack.PushF(sys.zoom.curScale)
 	case OC_ex2_zoomvar_pos_x:
-		sys.bcStack.PushF(sys.zoomPosXLag)
+		sys.bcStack.PushF(sys.zoom.curPos[0] / oc.localscl)
 	case OC_ex2_zoomvar_pos_y:
-		sys.bcStack.PushF(sys.zoomPosYLag)
+		sys.bcStack.PushF(sys.zoom.curPos[1] / oc.localscl)
 	case OC_ex2_zoomvar_lag:
-		sys.bcStack.PushF(sys.zoomlag)
+		sys.bcStack.PushF(sys.zoom.lag)
+	case OC_ex2_zoomvar_endlag:
+		sys.bcStack.PushF(sys.zoom.endLag)
 	case OC_ex2_zoomvar_time:
-		sys.bcStack.PushI(sys.enableZoomtime)
+		sys.bcStack.PushI(sys.zoom.time)
 	case OC_ex2_projclsnoverlap:
 		boxType := sys.bcStack.Pop().ToI()
 		targetID := sys.bcStack.Pop().ToI()
@@ -4155,6 +4164,8 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushI(c.guardCount)
 	case OC_ex2_airjumpcount:
 		sys.bcStack.PushI(c.airJumpCount)
+	case OC_ex2_parentexist:
+		sys.bcStack.PushB(c.parentExist())
 	case OC_ex2_shader:
 		shaderName := strings.ToLower(be.ReadPoolStringAt(i))
 		sys.bcStack.PushB(c.shader == shaderName)
@@ -4443,7 +4454,8 @@ type callFunction struct {
 
 func (cf callFunction) Run(c *Char, _ []int32) (changeState bool) {
 	// Check if the function exists
-	bf, ok := c.gi().callFuncs[cf.name]
+	// We use the functions from whatever player owns the current working state
+	bf, ok := sys.cgi[sys.workingState.playerNo].callFuncs[cf.name]
 
 	// If undefined, treat as no-op and log error
 	if !ok {
@@ -4527,6 +4539,18 @@ func (b StateBlock) Run(c *Char, ps []int32) (changeState bool) {
 	// But tricking the code like that made bytecode errors print from the wrong characters
 	sys.workingChar = c
 	if b.loopBlock {
+		// Helper to validate loop range
+		forLoopInRange := func() bool {
+			if b.forIncrement > 0 {
+				return b.forBegin <= b.forEnd
+			}
+			if b.forIncrement < 0 {
+				return b.forBegin >= b.forEnd
+			}
+			// Increment of 0 is allowed
+			return true
+		}
+
 		if b.forLoop {
 			if b.forAssign {
 				// Initial assign to control variable
@@ -4535,8 +4559,15 @@ func (b StateBlock) Run(c *Char, ps []int32) (changeState bool) {
 			} else {
 				b.forBegin = b.forExpression[0].evalI(c)
 			}
-			b.forEnd, b.forIncrement = b.forExpression[1].evalI(c), b.forExpression[2].evalI(c)
+			b.forEnd = b.forExpression[1].evalI(c)
+			b.forIncrement = b.forExpression[2].evalI(c)
+			// Validate initial loop range
+			// If the starting value is already outside the valid range, do not run the loop at all
+			if !forLoopInRange() {
+				return false
+			}
 		}
+
 		// Start loop
 		loopCount := 0
 		interrupt := false
@@ -4574,17 +4605,13 @@ func (b StateBlock) Run(c *Char, ps []int32) (changeState bool) {
 			}
 			// Decide if for loop should be stopped
 			if b.forLoop {
-				// Update loop count
+				// Update loop variable
 				if b.forAssign {
 					b.forBegin = sys.bcVar[b.forCtrlVar.vari].ToI() + b.forIncrement
 				} else {
 					b.forBegin += b.forIncrement
 				}
-				if b.forIncrement > 0 {
-					if b.forBegin > b.forEnd {
-						interrupt = true
-					}
-				} else if b.forBegin < b.forEnd {
+				if !forLoopInRange() {
 					interrupt = true
 				}
 				// Update control variable if loop should keep going
@@ -5837,7 +5864,7 @@ func (sc palFX) runSub(c *Char, pfd *PalFXDef, paramID byte, exp []BytecodeExp) 
 	case palFX_color:
 		pfd.color = exp[0].evalF(c) / 256
 	case palFX_hue:
-		pfd.hue = exp[0].evalF(c) / 256
+		pfd.hue = exp[0].evalF(c) / 512
 	case palFX_add:
 		pfd.add[0] = exp[0].evalI(c)
 		pfd.add[1] = exp[1].evalI(c)
@@ -6023,6 +6050,7 @@ const (
 	explod_shadow
 	explod_removeongethit
 	explod_removeonchangestate
+	explod_hideonpausemenu
 	explod_trans
 	explod_animelem
 	explod_animelemtime
@@ -6220,6 +6248,8 @@ func (sc explod) Run(c *Char, _ []int32) bool {
 			e.removeongethit = exp[0].evalB(c)
 		case explod_removeonchangestate:
 			e.removeonchangestate = exp[0].evalB(c)
+		case explod_hideonpausemenu:
+			e.hideonpausemenu = exp[0].evalB(c)
 		case explod_trans:
 			src := Clamp(int32(exp[0].evalI(c)), 0, 255)
 			dst := Clamp(int32(exp[1].evalI(c)), 0, 255)
@@ -6399,7 +6429,7 @@ func (sc explod) parseInterpolation(c *Char, e *Explod, paramID byte, exp []Byte
 	case explod_interpolation_pfx_color:
 		pfd.icolor[0] = exp[0].evalF(c) / 256
 	case explod_interpolation_pfx_hue:
-		pfd.ihue[0] = exp[0].evalF(c) / 256
+		pfd.ihue[0] = exp[0].evalF(c) / 512
 	default:
 	}
 	return true
@@ -6748,6 +6778,11 @@ func (sc modifyExplod) Run(c *Char, _ []int32) bool {
 				v := exp[0].evalB(c)
 				eachExpl(func(e *Explod) {
 					e.removeonchangestate = v
+				})
+			case explod_hideonpausemenu:
+				v := exp[0].evalB(c)
+				eachExpl(func(e *Explod) {
+					e.hideonpausemenu = v
 				})
 			case explod_trans:
 				src := Clamp(int32(exp[0].evalI(c)), 0, 255)
@@ -7329,7 +7364,7 @@ const (
 	hitDef_stand_friction
 	hitDef_crouch_friction
 	hitDef_keepstate
-	hitDef_missonreversaldef
+	hitDef_ignorereversaldef
 	hitDef_last = iota + afterImage_last + 1 - 1
 	hitDef_redirectid
 )
@@ -7357,12 +7392,12 @@ func (sc hitDef) runSub(c *Char, hd *HitDef, paramID byte, exp []BytecodeExp) {
 		hd.affectteam = exp[0].evalI(c)
 	case hitDef_teamside:
 		n := exp[0].evalI(c)
-		if n > 2 {
-			hd.teamside = 2
-		} else if n < 0 {
-			hd.teamside = 0
+		if n < 0 || n > 2 {
+			// TODO: We should do this in more parameters
+			// This could also be more specific and use crun, but right now adding that to runSub is more trouble than it's worth
+			sys.appendToConsole(c.warn() + fmt.Sprintf("invalid teamside: %d", n))
 		} else {
-			hd.teamside = int(n)
+			hd.teamside = int(n - 1)
 		}
 	case hitDef_id:
 		hd.id = Max(0, exp[0].evalI(c))
@@ -7707,8 +7742,8 @@ func (sc hitDef) runSub(c *Char, hd *HitDef, paramID byte, exp []BytecodeExp) {
 		hd.CrouchFriction = exp[0].evalF(c)
 	case hitDef_keepstate:
 		hd.KeepState = exp[0].evalB(c)
-	case hitDef_missonreversaldef:
-		hd.MissOnReversalDef = Btoi(exp[0].evalB(c))
+	case hitDef_ignorereversaldef:
+		hd.IgnoreReversalDef = Btoi(exp[0].evalB(c))
 	default:
 		if isPalFXParam(paramID) {
 			palFX(sc).runSub(c, &hd.palfx, paramID, exp)
@@ -8470,15 +8505,13 @@ func (sc modifyProjectile) Run(c *Char, _ []int32) bool {
 				})
 			case hitDef_teamside:
 				v1 := exp[0].evalI(c)
-				eachProj(func(p *Projectile) {
-					if v1 > 2 {
-						p.hitdef.teamside = 2
-					} else if v1 < 0 {
-						p.hitdef.teamside = 0
-					} else {
-						p.hitdef.teamside = int(v1)
-					}
-				})
+				if v1 < 0 || v1 > 2 {
+					sys.appendToConsole(crun.warn() + fmt.Sprintf("invalid teamside: %d", v1))
+				} else {
+					eachProj(func(p *Projectile) {
+						p.hitdef.teamside = int(v1 - 1)
+					})
+				}
 			case hitDef_id:
 				v1 := Max(0, exp[0].evalI(c))
 				eachProj(func(p *Projectile) {
@@ -10620,23 +10653,22 @@ func (sc attackMulSet) Run(c *Char, _ []int32) bool {
 		return false
 	}
 
-	attackRatio := crun.ocd().attackRatio
 	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
 		switch paramID {
 		case attackMulSet_value:
 			v := exp[0].evalF(c)
-			crun.attackMul[0] = v * attackRatio
-			crun.attackMul[1] = v * attackRatio
-			crun.attackMul[2] = v * attackRatio
-			crun.attackMul[3] = v * attackRatio
+			crun.attackMul[0] = v
+			crun.attackMul[1] = v
+			crun.attackMul[2] = v
+			crun.attackMul[3] = v
 		case attackMulSet_damage:
-			crun.attackMul[0] = exp[0].evalF(c) * attackRatio
+			crun.attackMul[0] = exp[0].evalF(c)
 		case attackMulSet_redlife:
-			crun.attackMul[1] = exp[0].evalF(c) * attackRatio
+			crun.attackMul[1] = exp[0].evalF(c)
 		case attackMulSet_dizzypoints:
-			crun.attackMul[2] = exp[0].evalF(c) * attackRatio
+			crun.attackMul[2] = exp[0].evalF(c)
 		case attackMulSet_guardpoints:
-			crun.attackMul[3] = exp[0].evalF(c) * attackRatio
+			crun.attackMul[3] = exp[0].evalF(c)
 		}
 		return true
 	})
@@ -11266,14 +11298,20 @@ const (
 	zoom_pos byte = iota
 	zoom_scale
 	zoom_lag
-	zoom_camerabound
+	zoom_endlag
 	zoom_time
+	zoom_camerabound
 	zoom_stagebound
 )
 
 func (sc zoom) Run(c *Char, _ []int32) bool {
+	// Defaults
 	pos := [2]float32{0, 0}
 	t := int32(1)
+	scl := float32(1)
+	lag := float32(0)
+	endlag := float32(0)
+
 	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
 		switch paramID {
 		case zoom_pos:
@@ -11282,23 +11320,48 @@ func (sc zoom) Run(c *Char, _ []int32) bool {
 				pos[1] = exp[1].evalF(c) * c.localscl
 			}
 		case zoom_scale:
-			sys.zoomScale = exp[0].evalF(c)
-		case zoom_camerabound:
-			sys.zoomCameraBound = exp[0].evalB(c)
-		case zoom_stagebound:
-			sys.zoomStageBound = exp[0].evalB(c)
+			v := exp[0].evalF(c)
+			if v <= 0 {
+				sys.appendToConsole(c.warn() + fmt.Sprintf("invalid Zoom scale value: %v", v))
+			} else {
+				scl = v
+			}
 		case zoom_lag:
-			sys.zoomlag = exp[0].evalF(c)
+			v := exp[0].evalF(c)
+			if v < 0 || v > 1 {
+				sys.appendToConsole(c.warn() + fmt.Sprintf("invalid Zoom lag value: %v", v))
+			} else {
+				lag = v
+			}
+		case zoom_endlag:
+			v := exp[0].evalF(c)
+			if v < 0 || v > 1 {
+				sys.appendToConsole(c.warn() + fmt.Sprintf("invalid Zoom endlag value: %v", v))
+			} else {
+				endlag = v
+			}
 		case zoom_time:
 			t = exp[0].evalI(c)
+		case zoom_camerabound:
+			sys.zoom.cameraBound = exp[0].evalB(c)
+		case zoom_stagebound:
+			sys.zoom.stageBound = exp[0].evalB(c)
 		}
 		return true
 	})
+
 	// This old calculation is both less accurate to Mugen and less intuitive to work with
-	// sys.zoomPos[0] = sys.zoomScale * pos[0]
-	sys.zoomPos[0] = pos[0]
-	sys.zoomPos[1] = pos[1]
-	sys.enableZoomtime = t
+	// sys.zoom.pos[0] = sys.zoom.scale * pos[0]
+
+	sys.zoom.pos = pos
+	sys.zoom.scale = scl
+	sys.zoom.lag = lag
+	sys.zoom.endLag = endlag
+	sys.zoom.time = t
+	sys.zoom.active = true
+
+	// "Current" values are not reset, for the sake of continuity between effects
+
 	return false
 }
 
@@ -14112,11 +14175,13 @@ const (
 	getHitVarSet_hitcount
 	getHitVarSet_hitshaketime
 	getHitVarSet_hittime
-	getHitVarSet_id
+	getHitVarSet_playerid
 	getHitVarSet_playerno
+	getHitVarSet_projid
 	getHitVarSet_redlife
 	getHitVarSet_slidetime
 	getHitVarSet_standfriction
+	getHitVarSet_teamside
 	getHitVarSet_xvel
 	getHitVarSet_yvel
 	getHitVarSet_zvel
@@ -14200,16 +14265,20 @@ func (sc getHitVarSet) Run(c *Char, _ []int32) bool {
 			crun.ghv.hittime = exp[0].evalI(c)
 		case getHitVarSet_hitshaketime:
 			crun.ghv.hitshaketime = exp[0].evalI(c)
-		case getHitVarSet_id:
+		case getHitVarSet_playerid:
 			crun.ghv.playerid = exp[0].evalI(c)
 		case getHitVarSet_playerno:
-			crun.ghv.playerno = int(exp[0].evalI(c))
+			crun.ghv.playerno = int(exp[0].evalI(c)) - 1
+		case getHitVarSet_projid:
+			crun.ghv.projid = exp[0].evalI(c)
 		case getHitVarSet_redlife:
 			crun.ghv.redlife = exp[0].evalI(c)
 		case getHitVarSet_slidetime:
 			crun.ghv.slidetime = exp[0].evalI(c)
 		case getHitVarSet_standfriction:
 			crun.ghv.standfriction = exp[0].evalF(c)
+		case getHitVarSet_teamside:
+			crun.ghv.teamside = int(exp[0].evalI(c)) - 1
 		case getHitVarSet_xvel:
 			crun.ghv.xvel = exp[0].evalF(c) * redirscale
 		case getHitVarSet_yvel:

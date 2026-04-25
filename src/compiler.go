@@ -310,6 +310,7 @@ var triggerMap = map[string]int{
 	"p4name":            1,
 	"palno":             1,
 	"parentdist":        1,
+	"parentexist":       1,
 	"pi":                1,
 	"playeridexist":     1,
 	"pos":               1,
@@ -447,7 +448,6 @@ var triggerMap = map[string]int{
 	"projvar":            1,
 	"rad":                1,
 	"randomrange":        1,
-	"ratiolevel":         1,
 	"receiveddamage":     1,
 	"receivedhits":       1,
 	"redlife":            1,
@@ -2421,6 +2421,8 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			opc = OC_ex2_explodvar_animtime
 		case "spriteplayerno":
 			opc = OC_ex2_explodvar_spriteplayerno
+		case "bindid":
+			opc = OC_ex2_explodvar_bindid
 		case "bindtime":
 			opc = OC_ex2_explodvar_bindtime
 		case "drawpal":
@@ -2723,6 +2725,8 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			opc = OC_ex_gethitvar_projid
 		case "guardko":
 			opc = OC_ex_gethitvar_guardko
+		case "teamside":
+			opc = OC_ex_gethitvar_teamside
 		default:
 			return bvNone(), Error("Invalid GetHitVar argument: " + c.token)
 		}
@@ -4069,6 +4073,8 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 		default:
 			return bvNone(), Error("Invalid ParentDist argument: " + c.token)
 		}
+	case "parentexist":
+		out.append(OC_ex2_, OC_ex2_parentexist)
 	case "pi":
 		bv = BytecodeFloat(float32(math.Pi))
 	case "e":
@@ -4614,6 +4620,8 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			opc = OC_ex2_gamevar_persistmusic
 		case "persistrounds":
 			opc = OC_ex2_gamevar_persistrounds
+		case "hidebars":
+			opc = OC_ex2_gamevar_hidebars
 		default:
 			return bvNone(), Error("Invalid GameVar argument: " + svname)
 		}
@@ -5026,8 +5034,6 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			return bvNone(), err
 		}
 		out.append(OC_ex_, OC_ex_playernoexist)
-	case "ratiolevel":
-		out.append(OC_ex_, OC_ex_ratiolevel)
 	case "receiveddamage":
 		out.append(OC_ex_, OC_ex_receiveddamage)
 	case "receivedhits":
@@ -5221,6 +5227,8 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			if n != 0 && n != 1 && !sys.ignoreMostErrors {
 				return bvNone(), Error(trname + " must be compared against 0 or 1")
 			}
+			// Check if the second comparison exists (ProjContact[ID] = value, [oper] value2)
+			hasSecondComparison := c.token == ","
 			// Build the underlying Proj*Time(id) expression
 			// Build it as a single block to prevent the first '=' from interrupting the current redirection
 			// https://github.com/ikemen-engine/Ikemen-GO/issues/2123
@@ -5231,7 +5239,22 @@ func (c *Compiler) expValue(out *BytecodeExp, in *string,
 			if err = c.evaluateComparison(&oldblock, in, false); err != nil {
 				return bvNone(), err
 			}
-			// "= 0" negates the generated time comparison
+			// For the second form, ensure negative time (no contact yet) isn't valid
+			if hasSecondComparison {
+				// Compile "pctime >= 0"
+				var guardblock BytecodeExp
+				guardblock.append(idExp...)
+				guardblock.append(opc)
+				guardblock.appendValue(BytecodeInt(0))
+				guardblock.append(OC_ge)
+				// Combine that with "oldblock"
+				var combined BytecodeExp
+				combined.append(guardblock...)
+				combined.append(oldblock...)
+				combined.append(OC_bland)
+				oldblock = combined
+			}
+			// "= 0" negates the generated result
 			if n == 0 {
 				oldblock.append(OC_blnot)
 			}

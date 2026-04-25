@@ -682,7 +682,7 @@ type HitDef struct {
 	StandFriction              float32
 	CrouchFriction             float32
 	KeepState                  bool
-	MissOnReversalDef          int32
+	IgnoreReversalDef          int32
 }
 
 func (hd *HitDef) reset(c *Char, proj *Projectile) {
@@ -707,7 +707,7 @@ func (hd *HitDef) reset(c *Char, proj *Projectile) {
 		hitflag:            int32(HF_H | HF_L | HF_A | HF_F),
 		guardflag:          0,
 		affectteam:         1,
-		teamside:           -1,
+		teamside:           c.teamside,
 		animtype:           RA_Light,
 		air_animtype:       RA_Unknown,
 		priority:           4,
@@ -807,7 +807,7 @@ func (hd *HitDef) reset(c *Char, proj *Projectile) {
 		StandFriction:       float32(math.NaN()),
 		CrouchFriction:      float32(math.NaN()),
 		KeepState:           false,
-		MissOnReversalDef:   0,
+		IgnoreReversalDef:   0,
 
 		reversal_guardflag:     IErr,
 		reversal_guardflag_not: IErr,
@@ -977,10 +977,6 @@ func (hd *HitDef) finalizeParams(c *Char, proj *Projectile) {
 		hd.maxdist[2], hd.mindist[2] = hd.snap[2], hd.snap[2]
 	}
 
-	if hd.teamside == -1 {
-		hd.teamside = c.teamside + 1
-	}
-
 	if hd.p2clsncheck < 0 {
 		if hd.reversal_attr != 0 {
 			hd.p2clsncheck = 1
@@ -1111,6 +1107,7 @@ type GetHitVar struct {
 	keepstate           bool
 	standfriction       float32
 	crouchfriction      float32
+	teamside            int
 }
 
 // This is called every time the char gets hit
@@ -1134,6 +1131,7 @@ func (ghv *GetHitVar) reset(c *Char) {
 		playerno:       -2, // Because it returns with +1
 		playerid:       -1,
 		projid:         -1,
+		teamside:       -2, // See playerno
 		fall_animtype:  RA_Unknown,
 		fall_xvelocity: float32(math.NaN()),
 		fall_yvelocity: -4.5 / originLs,
@@ -1366,7 +1364,7 @@ func (ai *AfterImage) setPalColor(color int32) {
 
 func (ai *AfterImage) setPalHueShift(huesh int32) {
 	if len(ai.palfx) > 0 {
-		ai.palfx[0].eHue = (float32(Clamp(huesh, -256, 256)) / 256)
+		ai.palfx[0].eHue = (float32(Clamp(huesh, -256, 256)) / 512)
 	}
 }
 
@@ -1610,6 +1608,7 @@ type Explod struct {
 	scale               [2]float32
 	removeongethit      bool
 	removeonchangestate bool
+	hideonpausemenu     bool
 	statehaschanged     bool
 	removetime          int32
 	velocity            [3]float32
@@ -1906,7 +1905,7 @@ func (e *Explod) update() {
 	parent := sys.playerID(e.playerId)
 	root := sys.chars[e.playerno][0]
 
-	if root.scf(SCF_disabled) {
+	if root.scf(SCF_disabled) || (e.hideonpausemenu && sys.motif.me.active) {
 		return
 	}
 
@@ -2920,10 +2919,12 @@ type CharGlobalInfo struct {
 	def                     string
 	nameLow                 string
 	displayname             string
+	defaultDisplayname      string
 	displaynameLow          string
 	author                  string
 	authorLow               string
 	lifebarname             string
+	defaultLifebarname      string
 	sff                     *Sff
 	palettedata             *Palette
 	snd                     *Snd
@@ -3379,7 +3380,6 @@ func (c *Char) enemyNearP2Clear() {
 func (c *Char) prepareNextRound() {
 	c.sysVarRangeSet(0, math.MaxInt32, 0)
 	c.sysFvarRangeSet(0, math.MaxInt32, 0)
-	atk := c.ocd().attackRatio
 	c.CharSystemVar = CharSystemVar{
 		bindToId:              -1,
 		angleDrawScale:        [2]float32{1, 1},
@@ -3388,7 +3388,7 @@ func (c *Char) prepareNextRound() {
 		sizeWidth:             [2]float32{c.baseWidthFront(), c.baseWidthBack()},
 		sizeHeight:            [2]float32{c.baseHeightTop(), c.baseHeightBottom()},
 		sizeDepth:             [2]float32{c.baseDepthTop(), c.baseDepthBottom()},
-		attackMul:             [4]float32{atk, atk, atk, atk},
+		attackMul:             [4]float32{1, 1, 1, 1},
 		fallDefenseMul:        1,
 		superDefenseMul:       1,
 		superDefenseMulBuffer: 1,
@@ -3465,12 +3465,40 @@ func (c *Char) ocd() *OverrideCharData {
 	return sys.sel.gameParams.ensureOverride(team, c.memberNo)
 }
 
+func (c *Char) applyMapOverrides() {
+	ocd := c.ocd()
+	if ocd == nil || len(ocd.maps) == 0 {
+		return
+	}
+	if c.mapArray == nil {
+		c.mapArray = make(map[string]float32)
+	}
+	for k, v := range ocd.maps {
+		c.mapArray[k] = v
+	}
+}
+
+// Restore defaults for values that ModifyPlayer can mutate and that would
+// otherwise leak when a cached root is reused as a fresh entrant.
+func (c *Char) resetCachedPlayerState() {
+	gi := c.gi()
+	gi.displayname = gi.defaultDisplayname
+	gi.lifebarname = gi.defaultLifebarname
+	gi.attackBase = gi.data.attack
+	gi.defenceBase = gi.data.defence
+	c.lifeMax = gi.data.life
+	c.powerMax = gi.data.power
+	c.dizzyPointsMax = gi.data.dizzypoints
+	c.guardPointsMax = gi.data.guardpoints
+}
+
 func (c *Char) load(def string) error {
 	gi := &sys.cgi[c.playerNo]
 
 	// Reset global info
 	gi.def = def
 	gi.displayname, gi.lifebarname, gi.author = "", "", ""
+	gi.defaultDisplayname, gi.defaultLifebarname = "", ""
 	gi.palettedata, gi.snd, gi.quotes = nil, nil, [MaxQuotes]string{}
 	gi.animTable = NewAnimationTable()
 	gi.fnt = make(map[int]*Fnt)
@@ -3596,6 +3624,8 @@ func (c *Char) load(def string) error {
 				if gi.lifebarname, ok, _ = is.getText("lifebarname"); !ok {
 					gi.lifebarname = gi.displayname
 				}
+				gi.defaultDisplayname = gi.displayname
+				gi.defaultLifebarname = gi.lifebarname
 				gi.author, _, _ = is.getText("author")
 				gi.nameLow = strings.ToLower(c.name)
 				gi.displaynameLow = strings.ToLower(gi.displayname)
@@ -4035,14 +4065,22 @@ func (c *Char) load(def string) error {
 	}
 
 	// Read animations
-	str = ""
+	var animFilename string
+	gi.animTable = NewAnimationTable()
+
 	if len(anim) > 0 {
 		anim_resolved := resolvePathRelativeToDef(anim)
-		if LoadFile(&anim_resolved, []string{def, "", sys.motif.Def, "data/"}, func(filename string) error {
-			var err_air error
-			str, err_air = LoadText(filename)
-			if err_air != nil {
-				return err_air
+		if err := LoadFile(&anim_resolved, []string{def, "", sys.motif.Def, "data/"}, func(filename string) error {
+			str, err := LoadText(filename)
+			if err != nil {
+				return err
+			}
+
+			animFilename = filename
+			gi.animTable.filename = filename
+
+			lines, i := SplitAndTrim(str, "\n"), 0
+			for gi.animTable.readAction(gi.sff, &gi.palettedata.palList, lines, &i, true) != nil {
 			}
 			return nil
 		}); err != nil {
@@ -4050,7 +4088,7 @@ func (c *Char) load(def string) error {
 		}
 	}
 
-	// Append common animations
+	// Read and merge common animations
 	for _, key := range SortedKeys(sys.cfg.Common.Air) {
 		for _, v := range sys.cfg.Common.Air[key] {
 			if err := LoadFile(&v, []string{def, sys.motif.Def, sys.fightScreen.def, "", "data/"}, func(filename string) error {
@@ -4058,7 +4096,20 @@ func (c *Char) load(def string) error {
 				if err != nil {
 					return err
 				}
-				str += "\n" + txt
+
+				// Create a temporary table for finer control and local error logging
+				tmp := NewAnimationTable()
+				tmp.filename = filename
+				lines, i := SplitAndTrim(txt, "\n"), 0
+				for tmp.readAction(gi.sff, &gi.palettedata.palList, lines, &i, true) != nil {
+				}
+
+				// Merge temporary table with the char's
+				for no, a := range tmp.anims {
+					if gi.animTable.anims[no] == nil {
+						gi.animTable.anims[no] = a
+					}
+				}
 				return nil
 			}); err != nil {
 				return err
@@ -4066,9 +4117,12 @@ func (c *Char) load(def string) error {
 		}
 	}
 
-	// Load animations
-	lines, i := SplitAndTrim(str, "\n"), 0
-	gi.animTable = ReadAnimationTable(gi.sff, &gi.palettedata.palList, lines, &i)
+	// Resolve Copy Action after all sources have been merged
+	// This only works because we didn't use ReadAnimationTable here, which would've done it per file
+	gi.animTable.resolveCopyAction()
+
+	// Final merged table keeps the main filename
+	gi.animTable.filename = animFilename
 
 	// Load sounds
 	if len(sound) > 0 {
@@ -4351,9 +4405,16 @@ func (c *Char) loadFx(def string) error {
 						}
 
 						if found_path != "" {
-							if err := loadFightFx(found_path, false, false); err != nil {
+							alreadyCachedNonChar := false
+							for _, ffx := range sys.ffx {
+								if ffx != nil && !ffx.isCharFX && ffx.fileName == found_path {
+									alreadyCachedNonChar = true
+									break
+								}
+							}
+							if err := loadFightFx(found_path, true, false); err != nil {
 								LogMessage("Could not load CommonFX %s for char %s: %v", found_path, def, err)
-							} else {
+							} else if !alreadyCachedNonChar {
 								gi.fxPath = append(gi.fxPath, found_path)
 							}
 						} else {
@@ -4612,6 +4673,10 @@ func (c *Char) parent(log bool) *Char {
 	}
 
 	return p
+}
+
+func (c *Char) parentExist() bool {
+	return c.parent(false) != nil
 }
 
 func (c *Char) root(log bool) *Char {
@@ -5485,6 +5550,8 @@ func (c *Char) explodVar(eid BytecodeValue, idx BytecodeValue, vtype OpCode) Byt
 			v = BytecodeInt(e.anim.AnimTime())
 		case OC_ex2_explodvar_spriteplayerno:
 			v = BytecodeInt(int32(e.spritePN) + 1)
+		case OC_ex2_explodvar_bindid:
+			v = BytecodeInt(e.bindId)
 		case OC_ex2_explodvar_bindtime:
 			v = BytecodeInt(e.bindtime)
 		case OC_ex2_explodvar_drawpal_group:
@@ -5764,48 +5831,40 @@ func (c *Char) pauseTimeTrigger() int32 {
 	return p
 }
 
-func (c *Char) projCancelTime(pid BytecodeValue) BytecodeValue {
+func (c *Char) projTimeTrigger(pid BytecodeValue, match func(ProjContact) bool) BytecodeValue {
 	if pid.IsUndefined() {
 		return BytecodeUndefined()
 	}
+	gi := c.gi()
 	id := pid.ToI()
-	if (id > 0 && id != c.gi().pcid) || c.gi().pctype != PC_Cancel || c.helperIndex > 0 {
+	if c.helperIndex > 0 || (id > 0 && id != gi.pcid) || !match(gi.pctype) {
 		return BytecodeInt(-1)
 	}
-	return BytecodeInt(c.gi().pctime)
+	return BytecodeInt(gi.pctime)
+}
+
+func (c *Char) projCancelTime(pid BytecodeValue) BytecodeValue {
+	return c.projTimeTrigger(pid, func(pc ProjContact) bool {
+		return pc == PC_Cancel
+	})
 }
 
 func (c *Char) projContactTime(pid BytecodeValue) BytecodeValue {
-	if pid.IsUndefined() {
-		return BytecodeUndefined()
-	}
-	id := pid.ToI()
-	if (id > 0 && id != c.gi().pcid) || c.gi().pctype == PC_Cancel || c.helperIndex > 0 {
-		return BytecodeInt(-1)
-	}
-	return BytecodeInt(c.gi().pctime)
+	return c.projTimeTrigger(pid, func(pc ProjContact) bool {
+		return pc != PC_Cancel
+	})
 }
 
 func (c *Char) projGuardedTime(pid BytecodeValue) BytecodeValue {
-	if pid.IsUndefined() {
-		return BytecodeUndefined()
-	}
-	id := pid.ToI()
-	if (id > 0 && id != c.gi().pcid) || c.gi().pctype != PC_Guarded || c.helperIndex > 0 {
-		return BytecodeInt(-1)
-	}
-	return BytecodeInt(c.gi().pctime)
+	return c.projTimeTrigger(pid, func(pc ProjContact) bool {
+		return pc == PC_Guarded
+	})
 }
 
 func (c *Char) projHitTime(pid BytecodeValue) BytecodeValue {
-	if pid.IsUndefined() {
-		return BytecodeUndefined()
-	}
-	id := pid.ToI()
-	if (id > 0 && id != c.gi().pcid) || c.gi().pctype != PC_Hit || c.helperIndex > 0 {
-		return BytecodeInt(-1)
-	}
-	return BytecodeInt(c.gi().pctime)
+	return c.projTimeTrigger(pid, func(pc ProjContact) bool {
+		return pc == PC_Hit
+	})
 }
 
 func (c *Char) reversalDefAttr(attr int32) bool {
@@ -7047,7 +7106,7 @@ func (c *Char) getAnim(n int32, ffx string) (a *Animation) {
 	}
 
 	if current_ffx != "" && current_ffx != "s" {
-		if sys.ffx[current_ffx] != nil && sys.ffx[current_ffx].animTable != nil {
+		if sys.ffx[current_ffx] != nil && sys.ffx[current_ffx].animTable.anims != nil {
 			a = sys.ffx[current_ffx].animTable.get(n)
 		}
 	} else {
@@ -7237,7 +7296,7 @@ func (c *Char) hitAdd(h int32) {
 		for _, tid := range c.targets {
 			if t := sys.playerID(tid); t != nil {
 				t.receivedHits += h
-				c.addComboHits(h)
+				sys.fightScreen.addComboHits(c.teamside, h)
 				break
 			}
 		}
@@ -7248,20 +7307,11 @@ func (c *Char) hitAdd(h int32) {
 				// This is a bit of a workaround for backward compatibility only
 				if p[0].receivedHits != 0 || p[0].ss.moveType == MT_H {
 					p[0].receivedHits += h
-					c.addComboHits(h)
+					sys.fightScreen.addComboHits(c.teamside, h)
 				}
 			}
 		}
 	}
-}
-
-// We track the combo separately from the enemy's received hits
-// So that if partners take turns doing hits to different enemies the combo still adds up
-func (c *Char) addComboHits(n int32) {
-	if c.teamside != 0 && c.teamside != 1 {
-		return
-	}
-	sys.fightScreen.combos[c.teamside].trueHits += n
 }
 
 // Always appends to preserve insertion order
@@ -10211,7 +10261,7 @@ func (c *Char) attrCheck(getter *Char, ghd *HitDef, gstyp StateType) bool {
 
 	// ReversalDef vs HitDef attributes check
 	if ghd.reversal_attr > 0 {
-		if c.hitdef.MissOnReversalDef > 0 {
+		if c.hitdef.IgnoreReversalDef > 0 {
 			return false
 		}
 		// Check HitDef validity
@@ -10580,6 +10630,7 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 		getter.ghv.hitid = hd.id
 		getter.ghv.playerno = hd.playerno
 		getter.ghv.playerid = hd.playerid
+		getter.ghv.teamside = hd.teamside
 		getter.ghv.projid = hd.projid
 		getter.ghv.keepstate = hd.KeepState
 		getter.ghv.groundtype = hd.ground_type
@@ -10647,6 +10698,7 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 			ghv.hitid = hd.id
 			ghv.playerno = hd.playerno
 			ghv.playerid = hd.playerid
+			ghv.teamside = hd.teamside
 			ghv.projid = hd.projid
 			ghv.xaccel = hd.xaccel * scaleratio * -byf
 			ghv.yaccel = hd.yaccel * scaleratio
@@ -11031,7 +11083,7 @@ func (c *Char) hitResultCheck(getter *Char, proj *Projectile) (hitResult int32) 
 		if (ghvset || getter.csf(CSF_gethit)) && getter.hoverIdx < 0 &&
 			!(c.hitdef.air_type == HT_None && getter.ss.stateType == ST_A || getter.ss.stateType != ST_A && c.hitdef.ground_type == HT_None) {
 			getter.receivedHits += hd.numhits
-			c.addComboHits(hd.numhits)
+			sys.fightScreen.addComboHits(hd.teamside, hd.numhits)
 		}
 		if !math.IsNaN(float64(hd.score[0])) && !c.asf(ASF_noscore) {
 			c.scoreAdd(hd.score[0])
@@ -11788,13 +11840,17 @@ func (c *Char) track() {
 			charleft := c.interPos[0]*c.localscl + edgeleft*c.localscl
 			charright := c.interPos[0]*c.localscl + edgeright*c.localscl
 			canmove := c.acttmp > 0 && !c.csf(CSF_posfreeze) && (c.bindTime == 0 || math.IsNaN(float64(c.bindPos[0])))
-
+			bindToCharacter := sys.playerID(c.bindToId)
 			if charleft < sys.cam.leftest {
 				sys.cam.leftest = charleft
 				if canmove {
 					sys.cam.leftestvel = c.vel[0] * c.localscl * c.facing
 				} else {
-					sys.cam.leftestvel = 0
+					if bindToCharacter != nil {
+						sys.cam.leftestvel = bindToCharacter.vel[0] * bindToCharacter.localscl * bindToCharacter.facing
+					} else {
+						sys.cam.leftestvel = 0
+					}
 				}
 			}
 			if charright > sys.cam.rightest {
@@ -11802,7 +11858,11 @@ func (c *Char) track() {
 				if canmove {
 					sys.cam.rightestvel = c.vel[0] * c.localscl * c.facing
 				} else {
-					sys.cam.rightestvel = 0
+					if bindToCharacter != nil {
+						sys.cam.rightestvel = bindToCharacter.vel[0] * bindToCharacter.localscl * bindToCharacter.facing
+					} else {
+						sys.cam.rightestvel = 0
+					}
 				}
 			}
 		}
@@ -12915,9 +12975,8 @@ func (cl *CharList) hitDetectionPlayer(getter *Char) {
 			continue
 		}
 
-		if c.atktmp != 0 && c.id != getter.id && (c.hitdef.affectteam == 0 ||
-			((getter.teamside != c.hitdef.teamside-1) == (c.hitdef.affectteam > 0) && c.hitdef.teamside >= 0) ||
-			((getter.teamside != c.teamside) == (c.hitdef.affectteam > 0) && c.hitdef.teamside < 0)) {
+		if c.atktmp != 0 && c.id != getter.id &&
+			(c.hitdef.affectteam == 0 || (getter.teamside != c.hitdef.teamside) == (c.hitdef.affectteam > 0)) {
 
 			// Guard distance check
 			// Mugen uses < checks so that 0 does not trigger proximity guard at 0 distance
@@ -13044,6 +13103,7 @@ func (cl *CharList) hitDetectionPlayer(getter *Char) {
 								getter.ghv.hitid = c.hitdef.id
 								getter.ghv.playerno = c.playerNo
 								getter.ghv.playerid = c.id
+								getter.ghv.teamside = c.hitdef.teamside
 								getter.fallTime = 0
 
 								// Fall flag
@@ -13154,15 +13214,15 @@ func (cl *CharList) hitDetectionProjectile(getter *Char) {
 
 			// In Mugen, projectiles couldn't hit their root even with the proper affectteam
 			if i == getter.playerNo && getter.helperIndex == 0 &&
-				(getter.teamside == p.hitdef.teamside-1) && !p.platform {
+				(getter.teamside == p.hitdef.teamside) && !p.platform {
 				continue
 			}
 
 			// Teamside check
 			// Since the teamside parameter is new to Ikemen, we can make that one allow the projectile to hit the root
 			if p.hitdef.affectteam != 0 &&
-				((getter.teamside != p.hitdef.teamside-1) != (p.hitdef.affectteam > 0) ||
-					(getter.teamside == p.hitdef.teamside-1) != (p.hitdef.affectteam < 0)) {
+				((getter.teamside != p.hitdef.teamside) != (p.hitdef.affectteam > 0) ||
+					(getter.teamside == p.hitdef.teamside) != (p.hitdef.affectteam < 0)) {
 				continue
 			}
 
@@ -13234,7 +13294,7 @@ func (cl *CharList) hitDetectionProjectile(getter *Char) {
 
 			// Cancel a projectile with hitflag P
 			if getter.atktmp != 0 && (getter.hitdef.affectteam == 0 ||
-				(p.hitdef.teamside-1 != getter.teamside) == (getter.hitdef.affectteam > 0)) &&
+				(p.hitdef.teamside != getter.teamside) == (getter.hitdef.affectteam > 0)) &&
 				getter.hitdef.hitflag&int32(HF_P) != 0 &&
 				getter.projClsnCheck(p, 1, 2) &&
 				sys.zAxisOverlap(getter.pos[2], getter.hitdef.attack_depth[0], getter.hitdef.attack_depth[1], getter.localscl,
