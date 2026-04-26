@@ -5784,6 +5784,24 @@ func (c *Compiler) fullExpression(in *string, vt ValueType) (BytecodeExp, error)
 	return be, nil
 }
 
+func parseTriggerNumber(name string) (tn int32, isAll bool, ok bool) {
+    if !strings.HasPrefix(name, "trigger") {
+        return 0, false, false
+    }
+
+    suffix := name[7:]
+    if suffix == "all" {
+        return 0, true, true
+    }
+
+    tn, ok = readDigit(suffix)
+    if !ok || tn < 1 || tn > 65536 {
+        return 0, false, false
+    }
+
+    return tn, false, true
+}
+
 func (c *Compiler) parseSection(sctrl func(name, data string) error) (IniSection, bool, error) {
 	is := NewIniSection()
 	_type, persistent, ignorehitpause := true, true, true
@@ -5909,13 +5927,22 @@ func (c *Compiler) parseSection(sctrl func(name, data string) error) (IniSection
 		}
 
 		if len(name) > 0 {
+			_, _, isTrigger := parseTriggerNumber(name)
+
+			// Reject empty triggers
+			if isTrigger && len(data) == 0 {
+				return nil, false, Error(name + " cannot be empty")
+			}
+
+			// Reject duplicate parameters (normally off)
 			_, ok := is[name]
-			if ok && (len(name) < 7 || name[:7] != "trigger") {
+			if ok && !isTrigger {
 				if sys.ignoreMostErrors {
 					continue
 				}
 				return nil, false, Error(name + " is duplicated")
 			}
+
 			if sctrl != nil {
 				switch name {
 				case "type":
@@ -5934,7 +5961,7 @@ func (c *Compiler) parseSection(sctrl func(name, data string) error) (IniSection
 					}
 					ignorehitpause = false
 				default:
-					if len(name) < 7 || name[:7] != "trigger" {
+					if !isTrigger {
 						is[name] = data
 						continue
 					}
@@ -6719,12 +6746,15 @@ func (c *Compiler) stateCompile(states map[int32]StateBytecode,
 			// Create this sctrl and get its properties
 			c.block = newStateBlock()
 			sc := newStateControllerBase()
+
 			var scf scFunc
 			var triggerall []BytecodeExp
-			// Flag if following triggers can never be true because of triggerall = 0
-			allTerminated := false
 			var trigger [][]BytecodeExp
 			var trexist []int8
+
+			// Flag if following triggers can never be true because of triggerall = 0
+			allTerminated := false
+
 			// Parse each line of the sctrl to get triggers and settings
 			is, ihp, err := c.parseSection(func(name, data string) error {
 				switch name {
@@ -6751,66 +6781,74 @@ func (c *Compiler) stateCompile(states map[int32]StateBytecode,
 					ih := Atoi(data) != 0
 					c.block.ignorehitpause = Btoi(ih) - 2
 					c.block.ctrlsIgnorehitpause = ih
-				case "triggerall":
-					be, err := c.fullExpression(&data, VT_Bool)
-					if err != nil {
-						return err
-					}
-					// If triggerall = 0 is encountered, flag it
-					if len(be) == 2 && be[0] == OC_int8 {
-						if be[1] == 0 {
-							allTerminated = true
-						}
-					} else if !allTerminated {
-						triggerall = append(triggerall, be)
-					}
 				default:
-					// Get the trigger number
-					tn, ok := readDigit(name[7:])
-					if !ok || tn < 1 || tn > 65536 {
-						if sys.ignoreMostErrors {
+					// Handle triggers
+					if strings.HasPrefix(name, "trigger") {
+						tn, isAll, ok := parseTriggerNumber(name)
+						if !ok {
+							if !sys.ignoreMostErrors {
+								return Error("Invalid trigger name: " + name)
+							}
 							break
 						}
-						return Error("Invalid trigger name: " + name)
-					}
-					// Add more entries to the trigger collection if needed
-					if len(trigger) < int(tn) {
-						trigger = append(trigger, make([][]BytecodeExp,
-							int(tn)-len(trigger))...)
-					}
-					if len(trexist) < int(tn) {
-						trexist = append(trexist, make([]int8, int(tn)-len(trexist))...)
-					}
-					tn--
-					// Parse trigger condition into a bytecode expression
-					be, err := c.fullExpression(&data, VT_Bool)
-					if err != nil {
-						if sys.ignoreMostErrors {
-							_break := false
-							for i := 0; i < int(tn); i++ {
-								if trexist[i] == 0 {
-									_break = true
+
+						// Convert to zero-based index
+						tidx := int(tn - 1)
+
+						// Parse trigger condition into a bytecode expression
+						be, err := c.fullExpression(&data, VT_Bool)
+						if err != nil {
+							// Skip this trigger if an earlier trigger number doesn't exist
+							// e.g. skip trigger3 if trigger2 was not found
+							if sys.ignoreMostErrors && !isAll {
+								broken := false
+								for i := 0; i < tidx; i++ {
+									if trexist[i] == 0 {
+										broken = true
+										break
+									}
+								}
+								if broken {
 									break
 								}
 							}
-							if _break {
-								break
+							return err
+						}
+
+						// Handle triggerall
+						if isAll {
+							// If triggerall = 0 is encountered, flag it
+							if len(be) == 2 && be[0] == OC_int8 {
+								if be[1] == 0 {
+									allTerminated = true
+								}
+							} else if !allTerminated {
+								triggerall = append(triggerall, be)
 							}
+							break
 						}
-						return err
-					}
-					// If trigger is a constant int value
-					if len(be) == 2 && be[0] == OC_int8 {
-						// If trigger is always false (0)
-						if be[1] == 0 {
-							// trexist == -1 means this specific trigger set can never be true
-							trexist[tn] = -1
-						} else if trexist[tn] == 0 {
-							trexist[tn] = 1
+
+						// Add more entries to the trigger collection if needed
+						if len(trigger) < int(tn) {
+							trigger = append(trigger, make([][]BytecodeExp, int(tn)-len(trigger))...)
 						}
-					} else if !allTerminated && trexist[tn] >= 0 {
-						trigger[tn] = append(trigger[tn], be)
-						trexist[tn] = 1
+						if len(trexist) < int(tn) {
+							trexist = append(trexist, make([]int8, int(tn)-len(trexist))...)
+						}
+
+						// If trigger is a constant int value
+						if len(be) == 2 && be[0] == OC_int8 {
+							// If trigger is always false (0)
+							if be[1] == 0 {
+								// trexist == -1 means this specific trigger set can never be true
+								trexist[tidx] = -1
+							} else if trexist[tidx] == 0 {
+								trexist[tidx] = 1
+							}
+						} else if !allTerminated && trexist[tidx] >= 0 {
+							trigger[tidx] = append(trigger[tidx], be)
+							trexist[tidx] = 1
+						}
 					}
 				}
 				return nil
