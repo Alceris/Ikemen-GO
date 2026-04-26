@@ -952,7 +952,7 @@ func (c *Compiler) explodSub(is IniSection,
 		explod_hideonpausemenu, VT_Bool, 1, false); err != nil {
 		return err
 	}
-	if err := c.paramTrans(is, sc, "", explod_trans, true); err != nil {
+	if err := c.paramTrans(is, sc, "", explod_trans); err != nil {
 		return err
 	}
 	if err := c.palFXSub(is, sc, "palfx."); err != nil {
@@ -1583,7 +1583,7 @@ func (c *Compiler) afterImageSub(is IniSection,
 		afterImage_redirectid, VT_Int, 1, false); err != nil {
 		return err
 	}
-	if err := c.paramTrans(is, sc, prefix, afterImage_trans, true); err != nil {
+	if err := c.paramTrans(is, sc, prefix, afterImage_trans); err != nil {
 		return err
 	}
 	if err := c.paramValue(is, sc, prefix+"time",
@@ -3502,7 +3502,7 @@ func (c *Compiler) trans(is IniSection, sc *StateControllerBase, _ int8) (StateC
 			trans_redirectid, VT_Int, 1, false); err != nil {
 			return err
 		}
-		if err := c.paramTrans(is, sc, "", trans_trans, false); err != nil {
+		if err := c.paramTrans(is, sc, "", trans_trans); err != nil {
 			return err
 		}
 		return nil
@@ -6918,7 +6918,7 @@ func (c *Compiler) modifyStageBG(is IniSection, sc *StateControllerBase, _ int8)
 		if _, ok := is["trans"]; ok { // Check if "trans" exists, since you can't set "any" from within paramTrans
 			any = true
 		}
-		if err := c.paramTrans(is, sc, "", modifyStageBG_trans, false); err != nil {
+		if err := c.paramTrans(is, sc, "", modifyStageBG_trans); err != nil {
 			return err
 		}
 		if err := c.stateParam(is, "angle", false, func(data string) error {

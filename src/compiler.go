@@ -6304,12 +6304,19 @@ func (c *Compiler) paramSaveData(is IniSection, sc *StateControllerBase, id byte
 }
 
 // Parse trans and alpha together
-func (c *Compiler) paramTrans(is IniSection, sc *StateControllerBase,
-	prefix string, id byte, cnsParam bool) error {
-
+func (c *Compiler) paramTrans(is IniSection, sc *StateControllerBase, prefix string, id byte) error {
+	// Check trans type first
+	// Alpha parameter is only parsed if type exists
+	// TODO: Maybe ZSS should parse alpha even if trans is not present
 	return c.stateParam(is, prefix+"trans", false, func(data string) error {
-		if len(data) == 0 {
-			return Error("trans type not specified")
+		// Mugen tolerates blank parameters here
+		if len(strings.TrimSpace(data)) == 0 {
+			if c.zssMode || !sys.ignoreMostErrors {
+				return Error("trans type not specified")
+			} else {
+				sys.appendToConsole("WARNING: " + sys.cgi[c.playerNo].nameLow + fmt.Sprintf(": Blank trans type in state %v ", c.stateNo))
+				return nil
+			}
 		}
 
 		// Defaults
@@ -6341,7 +6348,7 @@ func (c *Compiler) paramTrans(is IniSection, sc *StateControllerBase,
 			defsrc, defdst = 255, 255
 		default:
 			// In Mugen, CNS ignores invalid parameter names
-			if !cnsParam || c.zssMode || !sys.ignoreMostErrors {
+			if c.zssMode || !sys.ignoreMostErrors {
 				return Error("Invalid trans type: " + data)
 			} else {
 				sys.appendToConsole("WARNING: " + sys.cgi[c.playerNo].nameLow + fmt.Sprintf(": Invalid trans type: "+data+" in state %v ", c.stateNo))
@@ -6353,6 +6360,18 @@ func (c *Compiler) paramTrans(is IniSection, sc *StateControllerBase,
 
 		// Parse custom alpha
 		_ = c.stateParam(is, prefix+"alpha", false, func(data string) error {
+			// In Mugen, some state controllers tolerate a blank alpha and some don't
+			// In this instance, we can actually be more lenient than Mugen and always allow it in CNS, since ZSS already never allows it
+			// It's also more consistent with how Mugen handles other blank parameters
+			if len(strings.TrimSpace(data)) == 0 {
+				if c.zssMode || !sys.ignoreMostErrors {
+					return Error("alpha not specified")
+				} else {
+					sys.appendToConsole("WARNING: " + sys.cgi[c.playerNo].nameLow + fmt.Sprintf(": Blank trans alpha in state %v ", c.stateNo))
+					return nil
+				}
+			}
+
 			vals, err := c.exprs(data, VT_Int, 2)
 			if err != nil {
 				return err
