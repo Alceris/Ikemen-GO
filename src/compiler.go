@@ -6305,6 +6305,21 @@ func (c *Compiler) paramSaveData(is IniSection, sc *StateControllerBase, id byte
 
 // Parse trans and alpha together
 func (c *Compiler) paramTrans(is IniSection, sc *StateControllerBase, prefix string, id byte) error {
+	// Check if we have both trans and alpha parameters
+	_, alphaExists := is[prefix+"alpha"]
+	_, transExists := is[prefix+"trans"]
+
+	// Require trans parameter before accepting alpha
+	// In Mugen this fails silently
+	if alphaExists && !transExists {
+		if c.zssMode || !sys.ignoreMostErrors {
+			return Error("alpha defined without trans type")
+		} else {
+			sys.appendToConsole("WARNING: " + sys.cgi[c.playerNo].nameLow + fmt.Sprintf(": Alpha defined without trans type in state %v ", c.stateNo))
+			return nil
+		}
+	}
+
 	// Check trans type first
 	// Alpha parameter is only parsed if type exists
 	// TODO: Maybe ZSS should parse alpha even if trans is not present
