@@ -6643,15 +6643,13 @@ func cnsStringArray(arg string) ([]string, error) {
 	return fullStrArray, nil
 }
 
-// Compile a state file
+// Forwards state compiling to CNS or ZSS branches as appropriate
 func (c *Compiler) stateCompile(states map[int32]StateBytecode,
 	filename string, dirs []string, negoverride bool, constants map[string]float32) error {
 
-	// Reset ZSS mode
-	c.zssMode = false
-
-	var filetext string
+	// Determine type from extension
 	isZss := HasExtension(filename, ".zss")
+	var filetext string
 
 	// Load the contents of the state file
 	err := LoadFile(&filename, dirs, "", func(fname string) error {
@@ -6673,20 +6671,29 @@ func (c *Compiler) stateCompile(states map[int32]StateBytecode,
 				// Successfully loaded the alternative ZSS file
 				isZss = true
 				filename = zssAlt
-			} else {
-				return err
+				err = nil
 			}
-		} else {
+		}
+		// Handle other errors
+		if err != nil {
 			return err
 		}
 	}
 
-	// For ZSS files switch to stateCompileZ()
+	// Compile as ZSS
+	// Note that "negoverride" is ignored
 	if isZss {
-		return c.stateCompileZ(states, filename, filetext, constants)
+		return c.stateCompileZSS(states, filename, filetext, constants)
 	}
 
-	// Otherwise continue and parse as CNS code
+	// Compile as CNS
+	return c.stateCompileCNS(states, filename, filetext, negoverride, constants)
+}
+
+func (c *Compiler) stateCompileCNS(states map[int32]StateBytecode, filename, filetext string, negoverride bool, constants map[string]float32) error {
+	// Reset ZSS mode
+	c.zssMode = false
+
 	c.lines, c.i = SplitAndTrim(filetext, "\n"), 0
 	errmes := func(err error) error {
 		return Error(fmt.Sprintf("%v:%v:\n%v", filename, c.i+1, err.Error()))
@@ -7902,8 +7909,7 @@ func (c *Compiler) stateBlock(line *string, bl *StateBlock, root bool,
 	return c.wrongClosureToken()
 }
 
-// Compile a ZSS state
-func (c *Compiler) stateCompileZ(states map[int32]StateBytecode, filename, src string, constants map[string]float32) error {
+func (c *Compiler) stateCompileZSS(states map[int32]StateBytecode, filename, filetext string, constants map[string]float32) error {
 	// Enable ZSS mode
 	// TODO: There's some overlap between this flag and sys.ignoreMostErrors
 	c.zssMode = true
@@ -7916,7 +7922,7 @@ func (c *Compiler) stateCompileZ(states map[int32]StateBytecode, filename, src s
 	sys.ignoreMostErrors = false
 
 	c.block = nil
-	c.lines, c.i = SplitAndTrim(src, "\n"), 0
+	c.lines, c.i = SplitAndTrim(filetext, "\n"), 0
 	c.linechan = make(chan *string)
 	endchan := make(chan bool, 1)
 
@@ -8326,26 +8332,23 @@ func (c *Compiler) Compile(pn int, def string, constants map[string]float32) (ma
 	// Compile state files
 	for _, s := range st {
 		if len(s) > 0 {
-			if err := c.stateCompile(states, s, []string{def, "", "data/"},
-				sys.cgi[pn].ikemenver[0] == 0 &&
-					sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
+			if err := c.stateCompile(states, s, []string{def, "", sys.motif.Def, "data/"},
+				sys.cgi[pn].ikemenver[0] == 0 && sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
 				return nil, err
 			}
 		}
 	}
 	// Compile states in command file
 	if len(cmd) > 0 {
-		if err := c.stateCompile(states, cmd, []string{def, "", "data/"},
-			sys.cgi[pn].ikemenver[0] == 0 &&
-				sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
+		if err := c.stateCompile(states, cmd, []string{def, "", sys.motif.Def, "data/"},
+			sys.cgi[pn].ikemenver[0] == 0 && sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
 			return nil, err
 		}
 	}
 	// Compile states in stcommon state file
 	if len(stcommon) > 0 {
-		if err := c.stateCompile(states, stcommon, []string{def, "", "data/"},
-			sys.cgi[pn].ikemenver[0] == 0 &&
-				sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
+		if err := c.stateCompile(states, stcommon, []string{def, "", sys.motif.Def, "data/"},
+			sys.cgi[pn].ikemenver[0] == 0 && sys.cgi[pn].ikemenver[1] == 0, constants); err != nil {
 			return nil, err
 		}
 	}
