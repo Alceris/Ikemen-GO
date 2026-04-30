@@ -703,7 +703,7 @@ func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
 		// Choose render origin: top-left for screenpack/storyboard videos, center for everything else
 		var rcx float32
 		if bg._type != BG_Video || isStage {
-			rcx = float32(sys.gameWidth) / 2
+			rcx = sys.gameWidthFloat / 2
 		}
 
 		bg.anim.Draw(&rect, x-xsoffset, y, sclx, scly,
