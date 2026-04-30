@@ -65,6 +65,8 @@ type SystemStateVars struct {
 
 	scrrect                 [4]int32
 	gameWidth, gameHeight   int32
+	gameWidthFloat          float32 // Float forms used for precise screenpack math
+	gameHeightFloat         float32 // TODO: rework gameWidth/gameHeight as floats instead
 	widthScale, heightScale float32
 	gameEnd, frameSkip      bool
 	paused, frameStepFlag   bool
@@ -617,17 +619,21 @@ func (s *System) setGameSize(w, h int32) {
 
 	if screenAspect > targetAspect {
 		// Screen is wider than 4:3 - scale based on height
-		s.gameWidth = int32(float32(baseHeight) * screenAspect)
+		s.gameWidthFloat = float32(baseHeight) * screenAspect
+		s.gameWidth = int32(s.gameWidthFloat)
 		s.gameHeight = baseHeight
+		s.gameHeightFloat = float32(s.gameHeight)
 	} else {
 		// Screen is taller than 4:3 - scale based on width
 		s.gameWidth = baseWidth
-		s.gameHeight = int32(float32(baseWidth) / screenAspect)
+		s.gameWidthFloat = float32(baseWidth)
+		s.gameHeightFloat = float32(baseWidth) / screenAspect
+		s.gameHeight = int32(s.gameHeightFloat)
 	}
 
 	// Update scale
-	s.widthScale = float32(s.scrrect[2]) / float32(s.gameWidth)
-	s.heightScale = float32(s.scrrect[3]) / float32(s.gameHeight)
+	s.widthScale = float32(s.scrrect[2]) / s.gameWidthFloat
+	s.heightScale = float32(s.scrrect[3]) / s.gameHeightFloat
 }
 
 // Change aspect ratio at match start
