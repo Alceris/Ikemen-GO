@@ -17,6 +17,7 @@ local stageRandom = false
 local stageListNo = 0
 local t_aiRamp = {}
 local t_reservedChars = {{}, {}}
+local t_portraitPriority = {1, 1}
 local timerSelect = 0
 local cursorActive = {}
 local cursorDone = {}
@@ -770,9 +771,10 @@ end
 local function drawPortraitLayer(t_portraits, side, t, subname, last, dataField)
 	local lastIdx = #t_portraits
 	-- "next player replaces previous one" case
-	local paramsSide, params = getParams(side, lastIdx, t, subname)
+	local idx = clamp(t_portraitPriority[side] or 1, 1, lastIdx)
+	local paramsSide, params = getParams(side, idx, t, subname)
 	if paramsSide.num == 1 and last then
-		local v = t_portraits[lastIdx]
+		local v = t_portraits[idx]
 		local data = v[dataField]
 		if not v.skipCurrent and data ~= nil then
 			main.f_animPosDraw(
@@ -1840,6 +1842,7 @@ function start.f_selectReset(hardReset, preserveProgress)
 	t_reservedChars = {{}, {}}
 	cursorActive = {}
 	cursorDone = {}
+	t_portraitPriority = {1, 1}
 	if start.challenger == 0 and not preserveProgress then
 		start.t_roster = {}
 		start.reset = true
@@ -3259,6 +3262,9 @@ function start.f_selectMenu(side, cmd, player, member, selectState)
 				end
 				-- cursor changed position or character change within current slot
 				if start.p[side].t_selTemp[member].cell ~= start.c[player].cell or start.p[side].t_selTemp[member].ref ~= start.c[player].selRef then
+					if start.p[side].t_selTemp[member].cell ~= start.c[player].cell then
+						t_portraitPriority[side] = member
+					end
 					--start.p[side].t_selTemp[member].pal = 1
 					start.p[side].t_selTemp[member].ref = start.c[player].selRef
 					start.p[side].t_selTemp[member].cell = start.c[player].cell
