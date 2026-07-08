@@ -685,6 +685,7 @@ const (
 	OC_ex_incustomstate
 	OC_ex_isassertedchar
 	OC_ex_isassertedglobal
+	OC_ex_isassertedspecial
 	OC_ex_ishost
 	OC_ex_jugglepoints
 	OC_ex_localcoord_x
@@ -3396,6 +3397,9 @@ func (be BytecodeExp) run_ex(c *Char, i *int, oc *Char) {
 	case OC_ex_isassertedglobal:
 		flag := be.ReadIntAt(i)
 		sys.bcStack.PushB(sys.gsf(GlobalSpecialFlag(flag)))
+	case OC_ex_isassertedspecial:
+		flag := be.ReadIntAt(i)
+		sys.bcStack.PushB(c.csf(CharSpecialFlag(flag)))
 	case OC_ex_ishost:
 		sys.bcStack.PushB(c.isHost())
 	case OC_ex_jugglepoints:
@@ -11703,6 +11707,30 @@ func (sc victoryQuote) Run(c *Char, _ []int32) bool {
 		return true
 	})
 	crun.winquote = v
+	return false
+}
+
+type push StateControllerBase
+
+const (
+	push_ byte = iota
+	push_redirectid
+)
+
+func (sc push) Run(c *Char, _ []int32) bool {
+	crun := getRedirectedChar(c, StateControllerBase(sc), push_redirectid, "Push")
+	if crun == nil {
+		return false
+	}
+
+	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
+		switch paramID {
+		case push_:
+			sys.charList.pushDetection(crun)
+		}
+		return true
+	})
+
 	return false
 }
 

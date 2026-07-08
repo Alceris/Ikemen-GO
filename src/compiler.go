@@ -171,6 +171,7 @@ func newCharCompiler() *CharCompiler {
 		"parentmapset":         c.parentMapSet,
 		"playbgm":              c.playBgm,
 		"printtoconsole":       c.printToConsole,
+		"push":                 c.push,
 		"redlifeadd":           c.redLifeAdd,
 		"redlifeset":           c.redLifeSet,
 		"remapsprite":          c.remapSprite,
@@ -4885,6 +4886,8 @@ func (c *CharCompiler) expValue(out *BytecodeExp, in *string,
 			out.appendI32Op(OC_ex_isassertedglobal, int32(GSF_skiprounddisplay))
 		case "skipwindisplay":
 			out.appendI32Op(OC_ex_isassertedglobal, int32(GSF_skipwindisplay))
+		case "playerpush":
+			out.appendI32Op(OC_ex_isassertedspecial, int32(CSF_playerpush))
 		default:
 			return bvNone(), Error("Invalid AssertSpecial flag: " + c.token)
 		}

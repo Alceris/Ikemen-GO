@@ -4362,6 +4362,18 @@ func (c *CharCompiler) distOffset(is IniSection, sc *StateControllerBase) (State
 	return *ret, err
 }
 
+func (c *CharCompiler) push(is IniSection, sc *StateControllerBase) (StateController, error) {
+	ret, err := (*push)(sc), c.stateSec(is, func() error {
+		if err := c.paramValue(is, sc, "redirectid",
+			push_redirectid, VT_Int, 1, false); err != nil {
+			return err
+		}
+		sc.add(push_, nil)
+		return nil
+	})
+	return *ret, err
+}
+
 func (c *CharCompiler) victoryQuote(is IniSection, sc *StateControllerBase) (StateController, error) {
 	ret, err := (*victoryQuote)(sc), c.stateSec(is, func() error {
 		if err := c.paramValue(is, sc, "redirectid",

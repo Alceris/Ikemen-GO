@@ -9596,6 +9596,9 @@ func triggerFunctions(l *lua.LState) {
 			l.Push(lua.LBool(sys.debugWC.scf(SCF_disabled)))
 		case "over":
 			l.Push(lua.LBool(sys.debugWC.scf(SCF_over_alive) || sys.debugWC.scf(SCF_over_ko)))
+		// CharSpecialFlag
+		case "playerpush":
+			l.Push(lua.LBool(sys.debugWC.csf(CSF_playerpush)))
 		default:
 			l.RaiseError("\nInvalid argument: %v\n", strArg(l, 1))
 		}
