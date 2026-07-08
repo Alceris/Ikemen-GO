@@ -4895,6 +4895,10 @@ func (c *CharCompiler) expValue(out *BytecodeExp, in *string,
 			out.appendI32Op(OC_ex_isassertedglobal, int32(GSF_skipwindisplay))
 		case "playerpush":
 			out.appendI32Op(OC_ex_isassertedspecial, int32(CSF_playerpush))
+		case "movecamera.x":
+			out.appendI32Op(OC_ex_isassertedspecial, int32(CSF_movecamera_x))
+		case "movecamera.y":
+			out.appendI32Op(OC_ex_isassertedspecial, int32(CSF_movecamera_y))
 		default:
 			return bvNone(), Error("Invalid AssertSpecial flag: " + c.token)
 		}

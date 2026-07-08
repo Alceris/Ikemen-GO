@@ -9599,6 +9599,10 @@ func triggerFunctions(l *lua.LState) {
 		// CharSpecialFlag
 		case "playerpush":
 			l.Push(lua.LBool(sys.debugWC.csf(CSF_playerpush)))
+		case "movecamera.x":
+			l.Push(lua.LBool(sys.debugWC.csf(CSF_movecamera_x)))
+		case "movecamera.y":
+			l.Push(lua.LBool(sys.debugWC.csf(CSF_movecamera_y)))
 		default:
 			l.RaiseError("\nInvalid argument: %v\n", strArg(l, 1))
 		}
