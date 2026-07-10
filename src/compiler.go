@@ -184,6 +184,7 @@ func newCharCompiler() *CharCompiler {
 		"savefile":             c.saveFile,
 		"savestate":            c.saveState,
 		"scoreadd":             c.scoreAdd,
+		"sethashit":            c.setHasHit,
 		"shaderset":            c.shaderSet,
 		"shiftinput":           c.shiftInput,
 		"storyboard":           c.storyboard,
@@ -406,6 +407,7 @@ var triggerMap = map[string]int{
 	"guardcount":         1,
 	"guardpoints":        1,
 	"guardpointsmax":     1,
+	"hashit":    		  1,
 	"helperindexexist":   1,
 	"helpervar":          1,
 	"helpername":         1,
@@ -2781,6 +2783,11 @@ func (c *CharCompiler) expValue(out *BytecodeExp, in *string,
 		out.append(OC_ex2_, OC_ex2_groundlevel)
 	case "guardcount":
 		out.append(OC_ex2_, OC_ex2_guardcount)
+	case "hashit":
+		if _, err := c.oneArg(out, in, rd, true); err != nil {
+			return bvNone(), err
+		}
+		out.append(OC_ex2_, OC_ex2_hashit)
 	case "helperindexexist":
 		if _, err := c.oneArg(out, in, rd, true); err != nil {
 			return bvNone(), err

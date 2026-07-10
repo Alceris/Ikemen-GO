@@ -9864,6 +9864,43 @@ func (c *Char) targetAddSctrl(id int32) {
 	t.ghv.addId(c.id, c.gi().data.airjuggle)
 }
 
+func (c *Char) setHasHitSctrl(id int32, rem bool) {
+	// Get slice length
+	l := len(c.hitdefTargets)
+	if rem && l <= 0 {
+		return
+	}
+	// Check if ID exists
+	if id >= 0 || !rem {
+		t := sys.playerID(id)
+		if t == nil {
+			sys.appendToConsole(c.warn() + fmt.Sprintf("Invalid player ID for TargetAdd: %v", id))
+			return
+		}
+	}
+
+	// Add target to, or remove target from, char's "hitdefTargets" list, not using hitdefTargetsBuffer because we want this to apply immediately
+	if rem {
+		if id < 0 {
+			c.hitdefTargets = c.hitdefTargets[:0]
+			return
+		}
+		for i := l-1; i >= 0; i-- {
+			if c.hitdefTargets[i] == id {
+				if l <= 1 {
+					c.hitdefTargets = c.hitdefTargets[:0]
+					return
+				}
+				l--
+				c.hitdefTargets[i] = c.hitdefTargets[l]
+				c.hitdefTargets = c.hitdefTargets[:l]
+			}
+		}
+	} else if !c.hasTargetOfHitdef(id) {
+		c.hitdefTargets = append(c.hitdefTargets, id)
+	}
+}
+
 func (c *Char) setBindTime(time int32) {
 	c.bindTime = time
 	if time == 0 {

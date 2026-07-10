@@ -6774,6 +6774,25 @@ func (c *CharCompiler) targetAdd(is IniSection, sc *StateControllerBase) (StateC
 	return *ret, err
 }
 
+func (c *CharCompiler) setHasHit(is IniSection, sc *StateControllerBase) (StateController, error) {
+	ret, err := (*setHasHit)(sc), c.stateSec(is, func() error {
+		if err := c.paramValue(is, sc, "redirectid",
+			setHasHit_redirectid, VT_Int, 1, false); err != nil {
+			return err
+		}
+		if err := c.paramValue(is, sc, "playerid",
+			setHasHit_playerid, VT_Int, 1, true); err != nil {
+			return err
+		}
+		if err := c.paramValue(is, sc, "value",
+			setHasHit_value, VT_Bool, 1, false); err != nil {
+			return err
+		}
+		return nil
+	})
+	return *ret, err
+}
+
 func (c *CharCompiler) transformClsn(is IniSection, sc *StateControllerBase) (StateController, error) {
 	ret, err := (*transformClsn)(sc), c.stateSec(is, func() error {
 		if err := c.paramValue(is, sc, "redirectid",

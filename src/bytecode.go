@@ -768,6 +768,7 @@ const (
 	OC_ex2_fightscreenvar_round_callfight_time
 	OC_ex2_fightscreenvar_time_framespercount
 	OC_ex2_groundlevel
+	OC_ex2_hashit
 	OC_ex2_layerno
 	OC_ex2_runorder
 	OC_ex2_palfxvar_time
@@ -4097,6 +4098,10 @@ func (be BytecodeExp) run_ex2(c *Char, i *int, oc *Char) {
 		sys.bcStack.PushB(sys.sel.gameParams.PersistRounds)
 	case OC_ex2_gamevar_hidebars:
 		sys.bcStack.PushB(sys.lifebarHide || sys.dialogueHideBars)
+	// HasHit
+	case OC_ex2_hashit:
+		tid := sys.bcStack.Pop().ToI()
+		sys.bcStack.PushB(c.hasTargetOfHitdef(tid))
 	// HitByAttr
 	case OC_ex2_hitbyattr:
 		attr := be.ReadIntAt(i)
@@ -14985,6 +14990,37 @@ func (sc targetAdd) Run(c *Char, _ []int32) bool {
 	})
 
 	crun.targetAddSctrl(pid)
+
+	return false
+}
+
+type setHasHit StateControllerBase
+
+const (
+	setHasHit_playerid byte = iota
+	setHasHit_value
+	setHasHit_redirectid
+)
+
+func (sc setHasHit) Run(c *Char, _ []int32) bool {
+	crun := getRedirectedChar(c, StateControllerBase(sc), setHasHit_redirectid, "SetHasHit")
+	if crun == nil {
+		return false
+	}
+
+	var pid int32
+	var rem bool
+	StateControllerBase(sc).run(c, func(paramID byte, exp []BytecodeExp) bool {
+		switch paramID {
+		case setHasHit_playerid:
+			pid = exp[0].evalI(c)
+		case setHasHit_value:
+			rem = !exp[0].evalB(c)
+		}
+		return true
+	})
+
+	crun.setHasHitSctrl(pid, rem)
 
 	return false
 }
