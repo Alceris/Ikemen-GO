@@ -1367,6 +1367,7 @@ type VulkanSpriteProgramFragUniformBufferObject struct {
 	iResolution                   [2]float32 // 8 bytes
 	aspectRatio                   float32
 	sTime                         float32 // 4 bytes
+	cameraPosX, cameraPosY, cameraScale float32
 }
 
 type VulkanLightUniform struct {
@@ -6175,6 +6176,12 @@ func (r *Renderer_VK) SetUniformF(name string, values ...float32) {
 		r.VKState.VulkanSpriteProgramFragUniformBufferObject.aspectRatio = values[0]
 	case "sTime":
 		r.VKState.VulkanSpriteProgramFragUniformBufferObject.sTime = values[0]
+	case "cameraPosX":
+		r.VKState.VulkanSpriteProgramFragUniformBufferObject.cameraPosX = values[0]
+	case "cameraPosY":
+		r.VKState.VulkanSpriteProgramFragUniformBufferObject.cameraPosY = values[0]
+	case "cameraScale":
+		r.VKState.VulkanSpriteProgramFragUniformBufferObject.cameraScale = values[0]
 	}
 }
 

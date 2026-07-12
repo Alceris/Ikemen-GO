@@ -6,6 +6,7 @@
 	layout(location = 0) in vec2 position;
 	layout(location = 1) in vec2 uv;
 	layout(location = 0) out vec2 texcoord;
+	layout(location = 1) out vec2 pos;
 #else
 	// OPENGL / GLES PATH
 	#define COMPAT_VARYING out
@@ -22,6 +23,7 @@
 	COMPAT_ATTRIBUTE vec2 position;
 	COMPAT_ATTRIBUTE vec2 uv;
 	COMPAT_VARYING vec2 texcoord;
+	COMPAT_VARYING vec2 pos;
 #endif
 
 void main(void) {
@@ -32,4 +34,5 @@ void main(void) {
 		// Vulkan's Y-axis is inverted compared to OpenGL
 		gl_Position.y = -gl_Position.y;
 	#endif
+	pos = vec2(gl_Position);
 }

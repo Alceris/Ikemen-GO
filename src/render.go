@@ -707,6 +707,9 @@ func RenderSprite(rp RenderParams) {
 	gfx.SetUniformF("gray", spfx.gray)
 	gfx.SetUniformF("hue", spfx.hue)
 	gfx.SetUniformFv("tint", tint[:])
+	gfx.SetUniformF("cameraPosX", sys.cam.Pos[0] + sys.envShake.getOffset()[0])
+	gfx.SetUniformF("cameraPosY", sys.cam.Pos[1] + sys.cam.aspectcorrection + sys.cam.zoomanchorcorrection + sys.envShake.getOffset()[1])
+	gfx.SetUniformF("cameraScale", sys.cam.Scale)
 
 	if rp.paltex == nil {
 		gfx.SetUniformI("isRgba", 1)
@@ -983,6 +986,9 @@ func FillRect(rect [4]int32, color uint32, alpha [2]int32, fx *PalFX) {
 	gfx.SetUniformI("isRgba", 1)
 	gfx.SetUniformF("gray", spfx.gray)
 	gfx.SetUniformF("hue", spfx.hue)
+	gfx.SetUniformF("cameraPosX", sys.cam.Pos[0] + sys.envShake.getOffset()[0])
+	gfx.SetUniformF("cameraPosY", sys.cam.Pos[1] + sys.cam.aspectcorrection + sys.cam.zoomanchorcorrection + sys.envShake.getOffset()[1])
+	gfx.SetUniformF("cameraScale", sys.cam.Scale)
 
 	// Alpha is determined by tint, so we reset it here
 	// TODO: Maybe the shader shouldn't have a duplicate alpha component inside "tint"
