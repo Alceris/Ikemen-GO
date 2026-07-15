@@ -753,7 +753,7 @@ func (r *Renderer_GLES32) Init() {
 	r.spriteShader.RegisterAttributes("position", "uv")
 	r.spriteShader.RegisterUniforms("modelview", "projection", "x1x2x4x3",
 		"alpha", "tint", "mask", "neg", "gray", "add", "mult", "isFlat", "isRgba", "isTrapez", "hue",
-		"cameraPosX", "cameraPosY", "cameraScale")
+		"cameraPosX", "cameraPosY", "groundLevel", "cameraScale")
 	r.spriteShader.RegisterTextures("pal", "tex")
 
 	// Configure spriteVAO
@@ -2269,7 +2269,7 @@ func (r *Renderer_GLES32) LoadCustomSpriteShader(shaderName string, shaderData [
 	shader.RegisterUniforms("modelview", "projection", "x1x2x4x3",
 		"alpha", "tint", "mask", "neg", "gray", "add", "mult", "isFlat", "isRgba", "isTrapez", "hue",
 		"iTime", "iResolution", "aspectRatio", "sTime",
-		"cameraPosX", "cameraPosY", "cameraScale")
+		"cameraPosX", "cameraPosY", "groundLevel", "cameraScale")
 	shader.RegisterTextures("pal", "tex", "tex1", "tex2", "bgl_RenderedTexture")
 
 	shader.needsGrabPass = strings.Contains(fragSource, "bgl_RenderedTexture")

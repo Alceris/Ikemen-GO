@@ -11816,8 +11816,10 @@ func (c *Char) actionPrepare() {
 			c.alpha = [2]int32{255, 0}
 			c.offset = [2]float32{}
 			// Reset all AssertSpecial flags except the following, which are reset elsewhere in the code
-			c.assertFlag = (c.assertFlag&ASF_nostandguard | c.assertFlag&ASF_nocrouchguard | c.assertFlag&ASF_noairguard |
-				c.assertFlag&ASF_runfirst | c.assertFlag&ASF_runlast)
+		   // TODO: Maybe these don't need special treatment anymore either
+		   // All this does right now is make IsAsserted more accurate, but that's already inaccurate in other places
+		   keptflags := ASF_runfirst | ASF_runlast
+		   c.assertFlag &= keptflags
 		}
 
 		// The flags below also reset during hitpause, but are new to Ikemen and don't need the exception above
