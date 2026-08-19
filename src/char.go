@@ -5454,7 +5454,7 @@ func (c *Char) getPower() int32 {
 }
 
 func (c *Char) hitDefAttr(attr int32) bool {
-	return c.ss.moveType == MT_A && c.hitdef.testAttr(attr)
+	return c.ss.moveType != MT_I && c.hitdef.testAttr(attr)
 }
 
 func (c *Char) hitOver() bool {

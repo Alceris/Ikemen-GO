@@ -8512,6 +8512,9 @@ func (sc modifyProjectile) Run(c *Char, _ []int32) bool {
 				v1 := exp[0].evalI(c)
 				eachProj(func(p *Projectile) {
 					p.hits = v1
+					if v1 < 0 {
+						p.flagProjCancel()
+					}
 				})
 			case projectile_projpriority:
 				v1 := exp[0].evalI(c)
