@@ -8636,7 +8636,20 @@ func (sc modifyProjectile) Run(c *Char, _ []int32) bool {
 				eachProj(func(p *Projectile) {
 					p.anglerot[1] = xa
 				})
-			//case projectile_offset: // Pointless because it's only used when the projectile is created
+			case projectile_offset:
+				var v1, v2, v3 float32
+				v1 = exp[0].evalF(c) * redirscale
+				if len(exp) > 1 {
+					v2 = exp[1].evalF(c) * redirscale
+					if len(exp) > 2 {
+						v3 = exp[2].evalF(c) * redirscale
+					}
+				}
+				eachProj(func(p *Projectile) {
+					p.pos[0] += v1
+					p.pos[1] += v2
+					p.pos[2] += v3
+				})
 			case projectile_projsprpriority:
 				v1 := exp[0].evalI(c)
 				eachProj(func(p *Projectile) {
