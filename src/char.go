@@ -14152,12 +14152,12 @@ func (cl *CharList) collisionDetection() {
 	cl.rebindIfPushed()
 
 	// Player hit detection
-	for _, idx := range sortedOrder {
-		cl.hitDetectionPlayer(cl.runOrder[idx])
+	for _, c := range cl.creationOrder {
+		cl.hitDetectionPlayer(c)
 	}
 
 	// Projectile hit detection
-	for _, c := range cl.runOrder {
+	for _, c := range cl.creationOrder {
 		cl.hitDetectionProjectile(c)
 	}
 }
